@@ -208,7 +208,7 @@ struct Frag {
     addr u64        // computed byte offset in section during relaxation
     size u64        // computed byte size in section during relaxation
     line u32        // source line for diagnostics
-    pad u32
+    branch_pc32 bool // FK_RELAX_JMP: use PC32 for a plain external target in .code32
 }
 
 const FIX_ABS u8 = 0        // absolute data/imm (size = 1, 2, 4, 8)

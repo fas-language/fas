@@ -149,6 +149,7 @@ fn emit_relax_jmp(short_op u8, long_op u8, is_jcc bool, expr u32) void {
     s handle[Section] = cur_sec()
     f handle[Frag] = vec_add(&s.frags)
     f.kind = FK_RELAX_JMP
+    f.branch_pc32 = ac.code32
     f.is_long = 0
     f.data_off = zext[u32](short_op) | (zext[u32](long_op) << 8) | (if is_jcc { 0x10000 } else { 0 })
     f.expr = expr
@@ -528,7 +529,8 @@ fn as_layout_and_relax() void fails {
                             disp i64 = taddr - bitcast[i64](rel_off + 4)
                             patch_le(&s.out, rel_off, 4, bitcast[u64](disp))
                         } else if ev.kind == EV_SYM && (ev.sym_a & 0x80000000) == 0 {
-                            rtype u32 = if ev.variant == VAR_PLT || ev.variant == VAR_NONE { R_X86_64_PLT32 } else { resolve_variant_reloc(ev.variant, 4, FIX_PC) }
+                            kind u8 = if f.branch_pc32 { FIX_PC } else { FIX_PLT }
+                            rtype u32 = resolve_variant_reloc(ev.variant, 4, kind)
                             add_rela(s, rel_off, ev.sym_a, rtype, ev.val - 4, ev.variant != VAR_NONE)
                         } else {
                             try as_err_line(f.line, c"unresolved branch target")

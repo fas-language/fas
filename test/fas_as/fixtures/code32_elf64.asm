@@ -27,11 +27,17 @@ start32:
         lldt %ax
         ltr %ax
         call *%edi
+        call external
+        jmp external
+        jz external
         jmp *external
         lret $8
         .balign 32
         .code64
 start64:
+        call external
+        jmp external
+        jz external
         movl external(%eax), %ecx
         movq external, %rax
         lgdtq (%rax)

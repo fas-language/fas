@@ -259,7 +259,8 @@ fn encode_desc(d handle[InstrDesc], ops addr, nops u8, prefix_lock bool, prefix_
         f handle[Frag] = vec_at(&cur_sec().frags, zext[u64](fid))
         foff u32 = f.data_len
         emit_u32(0)
-        emit_fixup(fid, foff, 4, FIX_PLT, 1, 4, op0.expr)
+        kind u8 = if ac.code32 { FIX_PC } else { FIX_PLT }
+        emit_fixup(fid, foff, 4, kind, 1, 4, op0.expr)
         return
     }
 
