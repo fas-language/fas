@@ -284,8 +284,8 @@ done
 cmp image32.bin lld32.bin
 expect_exit 3 "$ld" -m elf_x86_64 -T layout32.lds start32.o callee32.o -o wrongclass 2>diag
 grep -q 'disagrees with linker script target' diag
-expect_exit 3 "$ld" -m elf_i386 start32.o callee32.o -o noscript 2>diag
-grep -q 'ELF32 output requires an executable linker script' diag
+expect_exit 1 "$ld" -m elf_i386 start32.o callee32.o -o noscript 2>diag
+grep -q 'unsupported emulation elf_i386' diag
 printf 'fas-ld i386 script: ELF32 inference, R_386_PC32/32/16, LONG and lld binary comparison: ok\n'
 
 cat > bios32.s <<'ASM'
@@ -447,3 +447,96 @@ grep -q 'kept_target$' gc32.symbols
 if grep -Eq ' (dead|discarded_target)$' gc32.symbols; then exit 1; fi
 printf 'fas-ld i386 script: KEEP roots sections, GC follows relocations and discards unused sections\n'
 
+cat > shared.lds <<'LDS'
+ENTRY(entry)
+PHDRS {
+  load PT_LOAD FLAGS(5) FILEHDR PHDRS;
+  dynamic PT_DYNAMIC FLAGS(4);
+  unwind 0x6474e550;
+}
+SECTIONS {
+  before = . - 4096;
+  . = SIZEOF_HEADERS;
+  .hash : { *(.hash) } :load
+  .gnu.hash : { *(.gnu.hash) }
+  .dynsym : { *(.dynsym) }
+  .dynstr : { *(.dynstr) }
+  .gnu.version : { *(.gnu.version) }
+  .gnu.version_d : { *(.gnu.version_d) }
+  .dynamic : { *(.dynamic) } :load :dynamic
+  .data : { *(.data) *(.got.plt) } :load
+  .eh_frame_hdr : { *(.eh_frame_hdr) } :load :unwind
+  .eh_frame : { KEEP(*(.eh_frame)) } :load
+  .text : { *(.text) } :load =0x90909090,
+  /DISCARD/ : { *(.note.GNU-stack) }
+}
+VERSION {
+  TEST_1 { global: entry; local: *; };
+}
+LDS
+cat > shared32.s <<'ASM'
+.text
+.globl entry
+.type entry, @function
+entry:
+.cfi_startproc
+    call 1f
+1:  popl %ecx
+    addl $_GLOBAL_OFFSET_TABLE_+(.-1b), %ecx
+    leal before@GOTOFF(%ecx), %eax
+    ret
+.cfi_endproc
+.size entry, .-entry
+ASM
+cat > shared64.s <<'ASM'
+.text
+.globl entry
+.type entry, @function
+entry:
+.cfi_startproc
+    leaq before(%rip), %rax
+    ret
+.cfi_endproc
+.size entry, .-entry
+ASM
+cat > shared-extra.s <<'ASM'
+.text
+.type local_entry, @function
+local_entry:
+.cfi_startproc
+    ret
+.cfi_endproc
+.size local_entry, .-local_entry
+ASM
+for bits in 32 64; do
+    emulation=elf_i386
+    if [[ $bits == 64 ]]; then emulation=elf_x86_64; fi
+    "$cc" -m"$bits" -c "shared$bits.s" -o "shared$bits.o"
+    "$cc" -m"$bits" -c shared-extra.s -o "shared-extra$bits.o"
+    for linker in "$ld" "$lld"; do
+        so="shared$bits.${linker##*/}.so"
+        "$linker" -m "$emulation" -shared -Bsymbolic --hash-style=both \
+            --eh-frame-hdr -soname sample.so -T shared.lds "shared$bits.o" "shared-extra$bits.o" -o "$so"
+        readelf -dWrV "$so" > "$so.meta"
+        grep -q 'There are no relocations' "$so.meta"
+        grep -q 'Name: TEST_1' "$so.meta"
+        readelf --dyn-syms -W "$so" | grep -q 'entry@@TEST_1$'
+        readelf -lW "$so" > "$so.phdrs"
+        for section in text eh_frame eh_frame_hdr; do
+            "${LLVM_OBJCOPY:-llvm-objcopy-22}" -O binary --only-section=".$section" "$so" "$so.$section"
+        done
+    done
+    for section in text eh_frame eh_frame_hdr phdrs; do
+        cmp "shared$bits.${ld##*/}.so.$section" "shared$bits.${lld##*/}.so.$section"
+    done
+done
+printf '.data\n.quad entry\n' > dynamic-fixup.s
+"$cc" -c dynamic-fixup.s -o dynamic-fixup.o
+if "$ld" -shared -Bsymbolic -T shared.lds shared64.o dynamic-fixup.o -o invalid.so 2>invalid.err; then
+    exit 1
+else
+    test "$?" -eq 3
+fi
+grep -q 'requires a run-time relocation' invalid.err
+test ! -e invalid.so
+printf 'fas-ld scripted i386 and x86-64 shared objects: versions, GOT displacement, unwind and dynamic-fixup refusal tested\n'

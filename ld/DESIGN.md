@@ -86,7 +86,7 @@ Passes execute serially on the main thread; data-parallel passes fan out over
 
 ## Executable linker scripts
 
-`-T PATH` and `--script=PATH` select the static x86-64 or i386 script path.
+`-T PATH` and `--script=PATH` select the x86-64 or i386 script path.
 Select i386 with `-m elf_i386`, `OUTPUT_FORMAT("elf32-i386")`, or
 `OUTPUT_ARCH(i386)`. Repeated `-m` options select the last emulation and
 must agree with the script when it specifies the target.
@@ -118,8 +118,8 @@ executables. ELF32 supports `R_386_32`, `R_386_PC32`, `R_386_PLT32`, `R_386_16`,
 `R_386_PC16`, `R_386_8`, and `R_386_PC8`. Unsupported
 directives and combinations return exit 3. These include `MEMORY` and
 `OVERLAY`, named input-file patterns, `COMMON`,
-TLS, IFUNC, unrelaxed GOT relocations, and script mode combined with shared
-output, maps, or `-r`. Static executables support `--gc-sections`. The
+TLS, IFUNC, unrelaxed GOT slot relocations, and script mode combined with
+maps or `-r`. Static executables support `--gc-sections`. The
 collector roots `KEEP` inputs and definitions referenced by script
 expressions. Archives listed under `--whole-archive`
 are supported. An ELF64 script can produce `-pie --no-dynamic-linker` output
@@ -132,8 +132,19 @@ places `.symtab`, `.strtab` and `.shstrtab` in order after content. The
 linker uses its existing whole-image build-ID algorithm and omits ld.lld's
 synthetic `.comment` section.
 
+Linux's i386 and x86-64 vDSO scripts use `-shared -Bsymbolic`. This mode
+supports embedded `VERSION` blocks, `SIZEOF_HEADERS`, paired `FILEHDR PHDRS`
+on the first `PT_LOAD`, `PT_DYNAMIC`, and `PT_GNU_EH_FRAME` (numeric
+`0x6474e550`). It emits versioned symbol and hash tables, an unwind index,
+and an i386 GOT base for `R_386_GOTOFF` and `R_386_GOTPC`. Scripted shared
+objects require all allocated relocations to resolve at link time. Imports,
+lifecycle sections, garbage collection, and retaining relocations are
+outside this subset. The unwind records occupy a dedicated `.eh_frame`
+section. Adjacent inputs can share an identical CIE with no relocations.
+
 `bash test/fas_ld_script.sh` checks the supported layout, script symbols,
-retained relocations, entry override, thread determinism and diagnostics.
+retained relocations, entry override, thread determinism, versioned shared
+output and diagnostics.
 `KERNEL_LD=fas bash test/cc_kernel.sh fcc defconfig` runs the scripted
 final-link path and boots the result.
 

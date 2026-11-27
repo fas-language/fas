@@ -256,6 +256,7 @@ fn shared_output_prepare() void fails {
             if local { g.res_vis = 2 }
         }
     }
+    if c.has_script { return }
     for f u64 in 0..ld.nobj {
         o handle[Obj] = obj(f)
         for k u64 in 0..zext[u64](o.nsec) {

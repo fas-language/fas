@@ -220,6 +220,7 @@ struct Config {
     nostdlib bool
     relro bool
     shared bool
+    symbolic bool
     soname Bytes
     has_soname bool
     no_undefined bool
@@ -492,6 +493,8 @@ fn parse_level(p handle[Parser], depth u64) u64 fails {
             c.pie = true
         } else if is(a, c"-shared") {
             c.shared = true
+        } else if is(a, c"-Bsymbolic") {
+            c.symbolic = true
         } else if is(a, c"--no-undefined") {
             c.no_undefined = true
         } else if is(a, c"--allow-multiple-definition") {
@@ -657,7 +660,11 @@ fn parse_command_line_argv(argv addr, argc u64) void fails {
     if !c.has_script && (c.emit_relocs || c.orphan_error || c.discard_none) {
         try refuse(c"--emit-relocs, --orphan-handling and --discard-none require an executable linker script")
     }
-    if c.has_script && (c.relocatable || c.shared || (c.pie && !c.no_interpreter) || c.has_interpreter || (c.pie && c.gc_sections) ||
+    if c.symbolic && !(c.has_script && c.shared) { try refuse(c"-Bsymbolic requires a scripted shared object") }
+    if c.has_script && c.shared && (!c.symbolic || c.gc_sections || c.emit_relocs) {
+        try refuse(c"scripted shared output requires -Bsymbolic without GC or retained relocations")
+    }
+    if c.has_script && (c.relocatable || (c.pie && (!c.no_interpreter || c.gc_sections)) || c.has_interpreter ||
         c.has_map || c.has_version_script || c.runpath != 0 || c.export_dynamic) {
         try refuse(c"linker-script mode does not support this combination of output options")
     }

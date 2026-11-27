@@ -9,6 +9,8 @@ const LS_ALIGN u8 = 6
 const LS_ASSERT u8 = 7
 const LS_UNARY u8 = 8
 const LS_BINARY u8 = 9
+const LS_HEADERS u8 = 10
+const LS_IMAGE_BASE u64 = 0xffffffffffffffff
 
 const LS_SECTION u8 = 1
 const LS_ASSIGN u8 = 2
@@ -72,6 +74,7 @@ struct LsSection {
     phdr_source u64
     discard bool
     inittext_orphan bool
+    eh_terminator bool
     info bool
     used bool
     mentioned bool
@@ -99,6 +102,8 @@ struct LsPhdr {
     kind u64
     flags u64
     explicit_flags bool
+    filehdr bool
+    phdrs bool
     first u64
     last u64
     alignment u64
@@ -124,6 +129,7 @@ struct Lscript {
     explicit_phdrs bool
     entry_seen bool
     file_end u64
+    first_alloc u64
 }
 
 struct LsLex {
@@ -332,6 +338,9 @@ fn ls_atom(l handle[LsLex]) u64 fails {
         return i
     }
     name Bytes = try ls_name(l)
+    if bytes_is(name, c"SIZEOF_HEADERS") {
+        return ls_expr_node(LS_HEADERS, at)
+    }
     if !(try ls_take(l, c"(")) {
         i u64 = ls_expr_node(LS_SYMBOL, at)
         ls_expr(i).text = name
@@ -471,15 +480,30 @@ fn ls_parse_phdrs(l handle[LsLex]) void fails {
             p.kind = 1
         } else if try ls_take(l, c"PT_NOTE") {
             p.kind = 4
+        } else if config().shared && try ls_take(l, c"PT_DYNAMIC") {
+            p.kind = 2
+        } else if config().shared && try ls_take(l, c"0x6474e550") {
+            p.kind = 0x6474e550
         } else {
             try ls_bad(l, c"unsupported program-header type ")
         }
-        if try ls_take(l, c"FLAGS") {
-            p.explicit_flags = true
-            try ls_expect(l, c"(")
-            p.flags = try ls_number(l)
-            if p.flags > 7 { try ls_bad(l, c"unsupported program-header flags before ") }
-            try ls_expect(l, c")")
+        while !ls_is(l, c";") {
+            if !p.explicit_flags && try ls_take(l, c"FLAGS") {
+                p.explicit_flags = true
+                try ls_expect(l, c"(")
+                p.flags = try ls_number(l)
+                if p.flags > 7 { try ls_bad(l, c"unsupported program-header flags before ") }
+                try ls_expect(l, c")")
+            } else if config().shared && p.kind == 1 && !p.filehdr && try ls_take(l, c"FILEHDR") {
+                p.filehdr = true
+            } else if config().shared && p.kind == 1 && !p.phdrs && try ls_take(l, c"PHDRS") {
+                p.phdrs = true
+            } else {
+                try ls_bad(l, c"unsupported program-header attribute ")
+            }
+        }
+        if p.filehdr != p.phdrs {
+            try refuse(c"scripted PT_LOAD requires FILEHDR and PHDRS together")
         }
         try ls_expect(l, c";")
     }
@@ -562,6 +586,7 @@ fn ls_parse_section(l handle[LsLex], name Bytes, at u64) u64 fails {
         if s.fill > 0xffffffff {
             try ls_exception(at, c"unsupported fill pattern for ", name, true)
         }
+        if config().shared { _ bool = try ls_take(l, c",") }
     }
     if s.discard && (s.addr_expr != 0 || s.lma_expr != 0 || s.align_expr != 0 ||
         s.info || s.phdrs.n != 0 || s.fill_bytes != 0) { try ls_exception(at, c"unsupported /DISCARD/ attributes", bytes_empty(), true) }
@@ -620,6 +645,23 @@ fn ls_parse(path Bytes, data Bytes) void fails {
             }
         } else if try ls_take(l, c"PHDRS") {
             try ls_parse_phdrs(l)
+        } else if config().shared && try ls_take(l, c"VERSION") {
+            if config().has_version_script { try ls_bad(l, c"duplicate VERSION at ") }
+            try ls_expect(l, c"{")
+            start u64 = l.at
+            depth u64 = 1
+            while l.word.n != 0 && depth != 0 {
+                if ls_is(l, c"}") {
+                    depth -= 1
+                    if depth == 0 { break }
+                }
+                if ls_is(l, c"{") { depth += 1 }
+                try ls_next(l)
+            }
+            if depth != 0 { try ls_bad(l, c"unterminated VERSION at ") }
+            try vs_parse(path, bytes(data.p + start, l.at - start))
+            config().has_version_script = true
+            try ls_expect(l, c"}")
         } else if try ls_take(l, c"OUTPUT_FORMAT") {
             try ls_expect(l, c"(")
             target Bytes = try ls_string(l)
@@ -797,6 +839,10 @@ fn ls_resolve_symbols() void fails {
 
 fn ls_input_kind(kind u32) bool {
     return kind == 1 || kind == 7 || kind == 8 || kind == 14 || kind == 15 || kind == 16
+}
+
+fn ls_candidate(f u64, kind u32) bool {
+    return ls_input_kind(kind) || f == ld.dyn_file
 }
 
 fn ls_match(pattern Bytes, name Bytes) bool {
@@ -991,7 +1037,7 @@ fn ls_select(s handle[LsSection], si u64, cmd handle[LsCmd]) void {
 // ELF32 boot scripts leave ordinary non-allocatable debug data and compiler
 // identification sections implicit. Keep them at address zero after SECTIONS.
 fn ls_debug_orphan(x u64, h handle[Sec]) bool {
-    if !config().elf32 || config().orphan_error || (h.flags & 2) != 0 || h.kind != 1 ||
+    if (!config().elf32 && !config().shared) || config().orphan_error || (h.flags & 2) != 0 || h.kind != 1 ||
         !(bytes_prefix(h.name, c".debug_") || bytes_is(h.name, c".comment")) { return false }
     sc handle[Lscript] = &ld.lscript
     i u64 = ls_lookup(&sc.section_names, h.name)
@@ -1046,7 +1092,7 @@ fn ls_match_inputs() void fails {
         lx(f).place = heap_alloc_zeroed((zext[u64](o.nsec) + 1) * sizeof[Place])
         for k u64 in 1..zext[u64](o.nsec) {
             h handle[Sec] = sec(o, k)
-            if !kept(f, k) || !ls_input_kind(h.kind) { continue }
+            if !kept(f, k) || !ls_candidate(f, h.kind) { continue }
             if config().strip_debug_arg.n != 0 && ls_strip_debug(h) {
                 lx(f).kept[u8, k] = 0
             } else {
@@ -1080,6 +1126,7 @@ fn ls_match_inputs() void fails {
                 def_section = i
             }
             s.phdr_source = def_section
+            if s.keep && sc.first_alloc == 0 { sc.first_alloc = i }
         }
         s.input_align = s.alignment
         if s.keep { inherited = s.flags }
@@ -1128,7 +1175,7 @@ fn ls_match_inputs() void fails {
 fn ls_abs(v handle[LsValue]) bool { return v.force || v.sec == 0 }
 
 fn ls_base(v handle[LsValue]) u64 {
-    return if v.sec != 0 { ls_sec(v.sec).address } else { 0 }
+    return if v.sec != 0 && v.sec != LS_IMAGE_BASE { ls_sec(v.sec).address } else { 0 }
 }
 
 fn ls_align(x u64, a u64) u64 {
@@ -1143,6 +1190,7 @@ fn ls_named(e handle[LsExpr], out handle[LsValue]) void fails {
     sc handle[Lscript] = &ld.lscript
     if bytes_is(e.text, c".") {
         out.sec = sc.current
+        if config().shared && out.sec == 0 { out.sec = LS_IMAGE_BASE }
         out.number = sc.dot - ls_base(out)
         return
     }
@@ -1238,6 +1286,9 @@ fn ls_eval(i u64, out handle[LsValue]) void fails {
     mem_set(handle_addr(out), 0, sizeof[LsValue])
     switch e.kind {
         case LS_NUMBER: out.number = e.number
+        case LS_HEADERS:
+            if !ld.lscript.explicit_phdrs { try refuse(c"SIZEOF_HEADERS requires explicit PHDRS") }
+            out.number = ls_elf_header_size() + ld.lscript.phdrs.n * ls_program_header_size()
         case LS_SYMBOL: try ls_named(e, out)
         case LS_ADDR: out.sec = e.number
         case LS_SIZE: out.number = ls_sec(e.number).size
@@ -1373,6 +1424,10 @@ fn ls_place_section(i u64) void fails {
             sc.dot = end
         }
     }
+    if s.eh_terminator {
+        if sc.dot > 0xfffffffffffffffb { try refuse(c"unwind terminator overflows section address range") }
+        sc.dot += 4
+    }
     s.size = sc.dot - s.address
     if sc.final_pass && config().elf32 &&
         (s.address > 0xffffffff || s.size > 0xffffffff || s.address + s.size > 0x100000000) {
@@ -1426,12 +1481,12 @@ fn ls_addresses() void fails {
         y handle[Sym] = sym(obj(ld.script_file), n)
         y.value = ls_value(&s.value)
         if config().elf32 && y.value > 0xffffffff {
-            if s.value.sec != 0 || y.value < 0xffffffff80000000 {
+            if (s.value.sec != 0 && s.value.sec != LS_IMAGE_BASE) || y.value < 0xffffffff80000000 {
                 try ls_exception(0, c"symbol exceeds ELF32 address range for ", s.name, false)
             }
             y.value &= 0xffffffff
         }
         y.kind = s.value.kind
-        sc.synth_sections[u64, n] = s.value.sec
+        sc.synth_sections[u64, n] = if s.value.sec == LS_IMAGE_BASE { sc.first_alloc } else { s.value.sec }
     }
 }
