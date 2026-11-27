@@ -143,10 +143,12 @@ fn fits_i32_or_u32(v i64) bool { return v >= -2147483648 && v <= 4294967295 }
 
 fn fits_i8_for_flags(v i64, flags u32) bool {
     if (flags & EF_66) != 0 {
+        if !fits_i16_or_u16(v) { return false }
         s i64 = sext[i64](trunc[i16](bitcast[u64](v)))
         return s >= -128 && s <= 127
     }
     if (flags & EF_REXW) == 0 {
+        if !fits_i32_or_u32(v) { return false }
         s i64 = sext[i64](trunc[i32](bitcast[u64](v)))
         return s >= -128 && s <= 127
     }
@@ -199,8 +201,9 @@ fn op_matches(ot u8, op handle[Operand], desc_flags u32) bool {
         if ot == OT_IMM1 { return ev.kind == EV_CONST && ev.val == 1 }
         if ot == OT_IMM8 { return ev.kind == EV_CONST && fits_u8_or_i8(ev.val) }
         if ot == OT_IMM8S { return ev.kind == EV_CONST && fits_i8_for_flags(ev.val, desc_flags) }
-        if ot == OT_IMM16 { return ev.kind != EV_CONST || fits_i16_or_u16(ev.val) }
-        if ot == OT_IMM32 { return ev.kind != EV_CONST || fits_i32_or_u32(ev.val) }
+        // Full-width 16- and 32-bit operands keep the low bits. Sign-extending
+        // forms still have to represent the original value at operand width.
+        if ot == OT_IMM16 || ot == OT_IMM32 { return true }
         if ot == OT_IMM32S { return ev.kind != EV_CONST || fits_i32(ev.val) }
         if ot == OT_IMM64 { return true }
     }
