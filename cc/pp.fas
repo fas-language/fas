@@ -444,6 +444,18 @@ fn pp_raw(p handle[Pp]) Token fails {
                     l.flags = F_BOL
                     continue
                 }
+                if c == 47 && src[u8, at + 1] == 42 {
+                    // A block comment counts as whitespace, so a directive can
+                    // still follow it on this line (`/**/#endif`). Skip only the
+                    // comment and keep scanning from the line start. An
+                    // unterminated comment leaves in_comment set for lex_next
+                    // to report.
+                    l.comment_loc = l.base + trunc[u32](at)
+                    l.in_comment = true
+                    l.at = at + 2
+                    if !lex_skip_block_comment(l) { break }
+                    continue
+                }
                 if c == 35 || (c == 37 && src[u8, at + 1] == 58) || c == 0 {
                     l.at = at
                     l.flags = F_BOL

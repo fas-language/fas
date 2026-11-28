@@ -29,3 +29,12 @@ PRAGMA(GCC diagnostic push)
 __COUNTER__ __COUNTER__
 #define GT >
 #pragma omp for schedule(static, 2 GT> 1)
+/* A directive after a comment must still close a skipped group. */
+#if 0
+skipped
+/**/#endif
+#if 0
+/* x */ /* y */ # else
+selected_after_comment
+/* multi
+   line */ #endif
