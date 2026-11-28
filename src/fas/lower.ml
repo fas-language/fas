@@ -631,7 +631,9 @@ let rec dtype s (t : Hir.ty) =
                 let members =
                   List.filter_map
                     (fun (fd : Hir.field) ->
-                      if fd.unsupported_reason <> None then None else Some (fd.name, dtype s fd.ty, fd.offset))
+                      if fd.unsupported_reason <> None then None
+                      else Some { Fir.member_name = fd.name; member_type = dtype s fd.ty;
+                                  member_offset = fd.offset; member_bits = None })
                     d.fields
                 in
                 Fir.Vec.set m.Fir.dtypes id

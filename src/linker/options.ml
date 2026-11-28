@@ -29,6 +29,8 @@ type t = {
   version_script : Version_script.t option;
   hash_style : hash_style;
   build_id : build_id;
+  max_page_size : int;
+      (** Segment and RELRO alignment, [p_align] of PT_LOAD (-z max-page-size). *)
 }
 
 let default =
@@ -51,4 +53,5 @@ let default =
     version_script = None;
     hash_style = Sysv;
     build_id = No_id;
+    max_page_size = 4096;
   }

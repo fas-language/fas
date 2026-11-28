@@ -1,0 +1,485 @@
+// cc2/sym.fas: High-speed open-addressing symbol interner with dense 32-bit SymIds.
+//
+// Pre-interns all preprocessor directives, builtin macros, and query operators at
+// startup so every directive/builtin dispatch is an O(1) integer switch.
+// Per-symbol hot flags (SYM_MACRO, SYM_BUILTIN, SYM_UNDEF, SYM_DEFINED_OP) live in
+// a flat byte array indexed by SymId: checking if an identifier needs macro expansion
+// is ONE byte load.
+
+const SYM_MACRO u8 = 1
+const SYM_BUILTIN u8 = 2
+const SYM_UNDEF u8 = 4
+const SYM_DEFINED_OP u8 = 8
+
+// Pre-interned SymId constants (assigned in exact order by sym_init).
+const SYM_EMPTY u32 = 0
+// Directives (1..20)
+const SYM_IF u32 = 1
+const SYM_IFDEF u32 = 2
+const SYM_IFNDEF u32 = 3
+const SYM_ELIF u32 = 4
+const SYM_ELIFDEF u32 = 5
+const SYM_ELIFNDEF u32 = 6
+const SYM_ELSE u32 = 7
+const SYM_ENDIF u32 = 8
+const SYM_INCLUDE u32 = 9
+const SYM_INCLUDE_NEXT u32 = 10
+const SYM_IMPORT u32 = 11
+const SYM_DEFINE u32 = 12
+const SYM_UNDEF_KW u32 = 13
+const SYM_LINE u32 = 14
+const SYM_PRAGMA u32 = 15
+const SYM_ERROR u32 = 16
+const SYM_WARNING u32 = 17
+const SYM_EMBED u32 = 18
+const SYM_IDENT u32 = 19
+const SYM_SCCS u32 = 20
+
+// Builtin macros & PP operators (21..45)
+const SYM_DEFINED u32 = 21
+const SYM_VA_ARGS u32 = 22
+const SYM_VA_OPT u32 = 23
+const SYM_TRUE u32 = 24
+const SYM_FALSE u32 = 25
+const SYM___LINE__ u32 = 26
+const SYM___FILE__ u32 = 27
+const SYM___BASE_FILE__ u32 = 28
+const SYM___FILE_NAME__ u32 = 29
+const SYM___COUNTER__ u32 = 30
+const SYM___INCLUDE_LEVEL__ u32 = 31
+const SYM___DATE__ u32 = 32
+const SYM___TIME__ u32 = 33
+const SYM___TIMESTAMP__ u32 = 34
+const SYM__PRAGMA u32 = 35
+const SYM___HAS_INCLUDE u32 = 36
+const SYM___HAS_INCLUDE_NEXT u32 = 37
+const SYM___HAS_EMBED u32 = 38
+const SYM___HAS_ATTRIBUTE u32 = 39
+const SYM___HAS_C_ATTRIBUTE u32 = 40
+const SYM___HAS_BUILTIN u32 = 41
+const SYM___HAS_FEATURE u32 = 42
+const SYM___HAS_EXTENSION u32 = 43
+const SYM___HAS_DECLSPEC_ATTRIBUTE u32 = 44
+const SYM___IS_IDENTIFIER u32 = 45
+
+// Pragma keywords (46..58)
+const SYM_ONCE u32 = 46
+const SYM_GCC u32 = 47
+const SYM_CLANG u32 = 48
+const SYM_DIAGNOSTIC u32 = 49
+const SYM_MESSAGE u32 = 50
+const SYM_SYSTEM_HEADER u32 = 51
+const SYM_DEPENDENCY u32 = 52
+const SYM_PUSH_MACRO u32 = 53
+const SYM_POP_MACRO u32 = 54
+const SYM_OMP u32 = 55
+const SYM_ACC u32 = 56
+const SYM_PUSH u32 = 57
+const SYM_POP u32 = 58
+const SYM_IGNORED u32 = 59
+const SYM_FATAL u32 = 60
+
+// Hash table slot: 24 bytes (hash32 + sym_id + inline first 16 bytes w0, w1). 0 = empty slot.
+// Bit 0 of hash = 1 iff len <= 16, so ~95% of C identifiers match in ONE cache line
+// without touching spellings[] or arena memory!
+struct SymSlot {
+    hash u32
+    id u32
+    w0 u64
+    w1 u64
+}
+
+struct SymTable {
+    arena Arena
+    slots addr         // SymSlot array, length = mask + 1
+    mask usize         // power of 2 minus 1
+    count usize        // number of interned symbols (including 0)
+    // Tiny L1/L2-resident hash table containing ONLY active macros & builtins!
+    active_slots addr
+    active_mask usize
+    active_count usize
+    // 8 KB (65536-bit) L1-resident Bloom filter for O(1) negative macro lookup!
+    bloom arr[1024, u64]
+    macro_epoch u32    // incremented on every #define / #undef / pop_macro
+    track_active bool  // true only in -E mode (for sym_lookup_active)
+    spellings Vec[Bytes]
+    canon Vec[u32]     // canonical SymId (same as id unless UCN-normalized)
+    flags Vec[u8]      // SYM_MACRO | SYM_BUILTIN | SYM_UNDEF | SYM_DEFINED_OP
+    macros Vec[addr]   // handle[Macro] or null, indexed by canon SymId
+}
+
+// Fast 64-bit hash: 1 masked u64 load for all identifiers <= 8 bytes (70% of C idents!).
+// Safe because source buffers have >= 64B zero padding and arena strings have >= 8B padding.
+fn sym_hash_bytes(p addr, n usize) u32 {
+    if n == 0 { return 1 }
+    h u64 = 0xcbf29ce484222325 ^ n
+    if n <= 8 {
+        mask u64 = (~zext[u64](0)) >> ((8 - n) * 8)
+        w u64 = p[u64] & mask
+        h = (h ^ w) * 0x9e3779b185ebca87
+        h ^= h >> 33
+        r u32 = trunc[u32](h)
+        return if r == 0 { 1 } else { r }
+    }
+    i usize = 0
+    while i + 8 <= n {
+        w u64 = (p + i)[u64]
+        h = (h ^ w) * 0x100000001b3
+        i += 8
+    }
+    if i < n {
+        rem usize = n - i
+        mask u64 = (~zext[u64](0)) >> ((8 - rem) * 8)
+        w u64 = (p + i)[u64] & mask
+        h = (h ^ w) * 0x100000001b3
+    }
+    h ^= h >> 33
+    h *= 0xff51afd7ed558ccd
+    h ^= h >> 33
+    r u32 = trunc[u32](h)
+    return if r == 0 { 1 } else { r }
+}
+
+fn sym_eq_fast(a addr, b addr, n usize) bool {
+    if n == 0 { return true }
+    if n <= 8 {
+        mask u64 = (~zext[u64](0)) >> ((8 - n) * 8)
+        return ((a[u64] ^ b[u64]) & mask) == 0
+    }
+    i usize = 0
+    while i + 8 <= n {
+        if (a + i)[u64] != (b + i)[u64] { return false }
+        i += 8
+    }
+    if i < n {
+        rem usize = n - i
+        mask u64 = (~zext[u64](0)) >> ((8 - rem) * 8)
+        return (((a + i)[u64] ^ (b + i)[u64]) & mask) == 0
+    }
+    return true
+}
+
+fn sym_grow(st handle[SymTable]) void {
+    new_cap usize = if st.mask == 0 { 4096 } else { (st.mask + 1) * 2 }
+    new_mask usize = new_cap - 1
+    new_slots addr = heap_alloc_zeroed(new_cap * sizeof[SymSlot])
+    if st.slots != null {
+        old_cap usize = st.mask + 1
+        for i usize in 0..old_cap {
+            slot handle[SymSlot] = handle_from_addr(st.slots + i * sizeof[SymSlot])
+            if slot.hash == 0 { continue }
+            pos usize = zext[usize](slot.hash) & new_mask
+            while (new_slots + pos * sizeof[SymSlot])[u32] != 0 {
+                pos = (pos + 1) & new_mask
+            }
+            dst handle[SymSlot] = handle_from_addr(new_slots + pos * sizeof[SymSlot])
+            dst.hash = slot.hash
+            dst.id = slot.id
+            dst.w0 = slot.w0
+            dst.w1 = slot.w1
+        }
+        heap_free(st.slots)
+    }
+    st.slots = new_slots
+    st.mask = new_mask
+}
+
+fn sym_intern(st handle[SymTable], p addr, n usize) u32 {
+    if st.count * 10 >= (st.mask + 1) * 7 { sym_grow(st) }
+    w0 u64 = 0
+    w1 u64 = 0
+    h u32 = 1
+    if n != 0 {
+        if n <= 8 {
+            mask8 u64 = (~zext[u64](0)) >> ((8 - n) * 8)
+            w0 = p[u64] & mask8
+            h64 u64 = ((0xcbf29ce484222325 ^ n) ^ w0) * 0x9e3779b185ebca87
+            h64 ^= h64 >> 33
+            h = trunc[u32](h64) | 1
+        } else if n <= 16 {
+            w0 = p[u64]
+            mask16 u64 = (~zext[u64](0)) >> ((16 - n) * 8)
+            w1 = (p + 8)[u64] & mask16
+            h64 u64 = (((0xcbf29ce484222325 ^ n) ^ w0) * 0x9e3779b185ebca87 ^ w1) * 0x9e3779b185ebca87
+            h64 ^= h64 >> 33
+            h = trunc[u32](h64) | 1
+        } else {
+            w0 = p[u64]
+            w1 = (p + 8)[u64]
+            h64 u64 = (((0xcbf29ce484222325 ^ n) ^ w0) * 0x100000001b3 ^ w1) * 0x100000001b3
+            ii usize = 16
+            while ii + 8 <= n {
+                h64 = (h64 ^ (p + ii)[u64]) * 0x100000001b3
+                ii += 8
+            }
+            if ii < n {
+                rem usize = n - ii
+                rmask u64 = (~zext[u64](0)) >> ((8 - rem) * 8)
+                h64 = (h64 ^ ((p + ii)[u64] & rmask)) * 0x100000001b3
+            }
+            h64 ^= h64 >> 33
+            h = trunc[u32](h64) & ~1
+            if h == 0 { h = 2 }
+        }
+    }
+    mask usize = st.mask
+    pos usize = zext[usize](h) & mask
+    while true {
+        slot handle[SymSlot] = handle_from_addr(st.slots + pos * sizeof[SymSlot])
+        if slot.hash == 0 {
+            id u32 = trunc[u32](st.count)
+            st.count += 1
+            dup addr = arena_alloc(&st.arena, n + 16, 1)
+            if n != 0 { mem_copy(dup, p, n) }
+            vec_push[Bytes](&st.spellings, bytes(dup, n))
+            vec_push[u32](&st.canon, id)
+            vec_push[u8](&st.flags, 0)
+            vec_push[addr](&st.macros, null)
+            slot.hash = h
+            slot.id = id
+            slot.w0 = w0
+            slot.w1 = w1
+            return id
+        }
+        if slot.hash == h && slot.w0 == w0 && slot.w1 == w1 {
+            if n <= 16 {
+                // For non-empty C identifiers of length 1..16, zero-padded (w0, w1) is unique!
+                if n != 0 || slot.id == 0 { return slot.id }
+            } else {
+                s Bytes = st.spellings.p[Bytes, zext[usize](slot.id)]
+                if s.n == n {
+                    rem usize = n - 16
+                    if rem <= 8 {
+                        rmask u64 = (~zext[u64](0)) >> ((8 - rem) * 8)
+                        if ((((s.p + 16)[u64] ^ (p + 16)[u64]) & rmask) == 0) { return slot.id }
+                    } else if sym_eq_fast(s.p + 16, p + 16, rem) {
+                        return slot.id
+                    }
+                }
+            }
+        }
+        pos = (pos + 1) & mask
+    }
+    return 0
+}
+
+fn sym_intern_b(st handle[SymTable], s Bytes) u32 {
+    return sym_intern(st, s.p, s.n)
+}
+
+fn sym_intern_c(st handle[SymTable], s addr) u32 {
+    n usize = cstr_len(s)
+    // Copy to zero-padded stack buf if short so u64 loads never read past c-string
+    if n < 16 {
+        tmp arr[16, u8] = {}
+        for i usize in 0..n { tmp[i] = s[u8, i] }
+        return sym_intern(st, &tmp[0], n)
+    }
+    return sym_intern(st, s, n)
+}
+
+fn sym_name(st handle[SymTable], id u32) Bytes {
+    return st.spellings.p[Bytes, zext[usize](id)]
+}
+
+fn sym_active_grow(st handle[SymTable]) void {
+    new_cap usize = if st.active_mask == 0 { 1024 } else { (st.active_mask + 1) * 2 }
+    new_mask usize = new_cap - 1
+    new_slots addr = heap_alloc_zeroed(new_cap * sizeof[SymSlot])
+    if st.active_slots != null {
+        old_cap usize = st.active_mask + 1
+        for i usize in 0..old_cap {
+            slot handle[SymSlot] = handle_from_addr(st.active_slots + i * sizeof[SymSlot])
+            if slot.hash == 0 { continue }
+            pos usize = zext[usize](slot.hash) & new_mask
+            while (new_slots + pos * sizeof[SymSlot])[u32] != 0 {
+                pos = (pos + 1) & new_mask
+            }
+            dst handle[SymSlot] = handle_from_addr(new_slots + pos * sizeof[SymSlot])
+            dst.hash = slot.hash
+            dst.id = slot.id
+            dst.w0 = slot.w0
+            dst.w1 = slot.w1
+        }
+        heap_free(st.active_slots)
+    }
+    st.active_slots = new_slots
+    st.active_mask = new_mask
+}
+
+// 1-cache-line 2-bit register-blocked Bloom filter (8 KB, L1-resident):
+// 0.14% false positive rate with ONE 64-bit load!
+fn sym_bloom_hash(p addr, n usize) u32 {
+    a u32 = zext[u32](p[u8])
+    b u32 = zext[u32](p[u8, n - 1])
+    c u32 = zext[u32](p[u8, n >> 1])
+    k u32 = (a | (b << 8) | (c << 16) | (trunc[u32](n) << 24)) * 0x9e3779b1
+    return k ^ (k >> 15)
+}
+
+fn sym_active_insert(st handle[SymTable], id u32) void {
+    if st.active_count * 10 >= (st.active_mask + 1) * 6 { sym_active_grow(st) }
+    s Bytes = st.spellings.p[Bytes, zext[usize](id)]
+    if s.n != 0 {
+        bh u32 = sym_bloom_hash(s.p, s.n)
+        bmask u64 = (zext[u64](1) << ((bh >> 10) & 63)) | (zext[u64](1) << ((bh >> 16) & 63))
+        st.bloom[zext[usize](bh & 1023)] |= bmask
+    }
+    h u32 = sym_hash_bytes(s.p, s.n)
+    mask usize = st.active_mask
+    pos usize = zext[usize](h) & mask
+    while true {
+        slot handle[SymSlot] = handle_from_addr(st.active_slots + pos * sizeof[SymSlot])
+        if slot.hash == 0 {
+            slot.hash = h
+            slot.id = id
+            slot.w0 = 0
+            slot.w1 = 0
+            st.active_count += 1
+            return
+        }
+        if slot.id == id { return }
+        pos = (pos + 1) & mask
+    }
+}
+
+// Fast L1-resident check: returns active macro/builtin SymId, or 0 if not active.
+// 99.86% of non-macro identifiers reject in ONE L1 cache load!
+fn sym_lookup_active(st handle[SymTable], p addr, n usize) u32 {
+    bh u32 = sym_bloom_hash(p, n)
+    bmask u64 = (zext[u64](1) << ((bh >> 10) & 63)) | (zext[u64](1) << ((bh >> 16) & 63))
+    if (st.bloom[zext[usize](bh & 1023)] & bmask) != bmask { return 0 }
+    h u32 = sym_hash_bytes(p, n)
+    mask usize = st.active_mask
+    pos usize = zext[usize](h) & mask
+    while true {
+        slot handle[SymSlot] = handle_from_addr(st.active_slots + pos * sizeof[SymSlot])
+        if slot.hash == 0 { return 0 }
+        if slot.hash == h {
+            s Bytes = st.spellings.p[Bytes, zext[usize](slot.id)]
+            if s.n == n && sym_eq_fast(s.p, p, n) {
+                f u8 = st.flags.p[u8, zext[usize](slot.id)]
+                if (f & SYM_MACRO) != 0 || ((f & SYM_BUILTIN) != 0 && (f & SYM_UNDEF) == 0) {
+                    return slot.id
+                }
+                return 0
+            }
+        }
+        pos = (pos + 1) & mask
+    }
+    return 0
+}
+
+fn sym_init(st handle[SymTable]) void {
+    // Pre-reserve for fast startup without early rehashes
+    sym_grow(st)
+    sym_active_grow(st)
+    vec_reserve[Bytes](&st.spellings, 1024)
+    vec_reserve[u32](&st.canon, 1024)
+    vec_reserve[u8](&st.flags, 1024)
+    vec_reserve[addr](&st.macros, 1024)
+
+    // 0: empty
+    sym_intern(st, c"", 0)
+    // 1..20: directives
+    assert(sym_intern_c(st, c"if") == SYM_IF)
+    assert(sym_intern_c(st, c"ifdef") == SYM_IFDEF)
+    assert(sym_intern_c(st, c"ifndef") == SYM_IFNDEF)
+    assert(sym_intern_c(st, c"elif") == SYM_ELIF)
+    assert(sym_intern_c(st, c"elifdef") == SYM_ELIFDEF)
+    assert(sym_intern_c(st, c"elifndef") == SYM_ELIFNDEF)
+    assert(sym_intern_c(st, c"else") == SYM_ELSE)
+    assert(sym_intern_c(st, c"endif") == SYM_ENDIF)
+    assert(sym_intern_c(st, c"include") == SYM_INCLUDE)
+    assert(sym_intern_c(st, c"include_next") == SYM_INCLUDE_NEXT)
+    assert(sym_intern_c(st, c"import") == SYM_IMPORT)
+    assert(sym_intern_c(st, c"define") == SYM_DEFINE)
+    assert(sym_intern_c(st, c"undef") == SYM_UNDEF_KW)
+    assert(sym_intern_c(st, c"line") == SYM_LINE)
+    assert(sym_intern_c(st, c"pragma") == SYM_PRAGMA)
+    assert(sym_intern_c(st, c"error") == SYM_ERROR)
+    assert(sym_intern_c(st, c"warning") == SYM_WARNING)
+    assert(sym_intern_c(st, c"embed") == SYM_EMBED)
+    assert(sym_intern_c(st, c"ident") == SYM_IDENT)
+    assert(sym_intern_c(st, c"sccs") == SYM_SCCS)
+
+    // 21..45: builtins & operators
+    assert(sym_intern_c(st, c"defined") == SYM_DEFINED)
+    assert(sym_intern_c(st, c"__VA_ARGS__") == SYM_VA_ARGS)
+    assert(sym_intern_c(st, c"__VA_OPT__") == SYM_VA_OPT)
+    assert(sym_intern_c(st, c"true") == SYM_TRUE)
+    assert(sym_intern_c(st, c"false") == SYM_FALSE)
+    assert(sym_intern_c(st, c"__LINE__") == SYM___LINE__)
+    assert(sym_intern_c(st, c"__FILE__") == SYM___FILE__)
+    assert(sym_intern_c(st, c"__BASE_FILE__") == SYM___BASE_FILE__)
+    assert(sym_intern_c(st, c"__FILE_NAME__") == SYM___FILE_NAME__)
+    assert(sym_intern_c(st, c"__COUNTER__") == SYM___COUNTER__)
+    assert(sym_intern_c(st, c"__INCLUDE_LEVEL__") == SYM___INCLUDE_LEVEL__)
+    assert(sym_intern_c(st, c"__DATE__") == SYM___DATE__)
+    assert(sym_intern_c(st, c"__TIME__") == SYM___TIME__)
+    assert(sym_intern_c(st, c"__TIMESTAMP__") == SYM___TIMESTAMP__)
+    assert(sym_intern_c(st, c"_Pragma") == SYM__PRAGMA)
+    assert(sym_intern_c(st, c"__has_include") == SYM___HAS_INCLUDE)
+    assert(sym_intern_c(st, c"__has_include_next") == SYM___HAS_INCLUDE_NEXT)
+    assert(sym_intern_c(st, c"__has_embed") == SYM___HAS_EMBED)
+    assert(sym_intern_c(st, c"__has_attribute") == SYM___HAS_ATTRIBUTE)
+    assert(sym_intern_c(st, c"__has_c_attribute") == SYM___HAS_C_ATTRIBUTE)
+    assert(sym_intern_c(st, c"__has_builtin") == SYM___HAS_BUILTIN)
+    assert(sym_intern_c(st, c"__has_feature") == SYM___HAS_FEATURE)
+    assert(sym_intern_c(st, c"__has_extension") == SYM___HAS_EXTENSION)
+    assert(sym_intern_c(st, c"__has_declspec_attribute") == SYM___HAS_DECLSPEC_ATTRIBUTE)
+    assert(sym_intern_c(st, c"__is_identifier") == SYM___IS_IDENTIFIER)
+
+    // 46..60: pragma keywords
+    assert(sym_intern_c(st, c"once") == SYM_ONCE)
+    assert(sym_intern_c(st, c"GCC") == SYM_GCC)
+    assert(sym_intern_c(st, c"clang") == SYM_CLANG)
+    assert(sym_intern_c(st, c"diagnostic") == SYM_DIAGNOSTIC)
+    assert(sym_intern_c(st, c"message") == SYM_MESSAGE)
+    assert(sym_intern_c(st, c"system_header") == SYM_SYSTEM_HEADER)
+    assert(sym_intern_c(st, c"dependency") == SYM_DEPENDENCY)
+    assert(sym_intern_c(st, c"push_macro") == SYM_PUSH_MACRO)
+    assert(sym_intern_c(st, c"pop_macro") == SYM_POP_MACRO)
+    assert(sym_intern_c(st, c"omp") == SYM_OMP)
+    assert(sym_intern_c(st, c"acc") == SYM_ACC)
+    assert(sym_intern_c(st, c"push") == SYM_PUSH)
+    assert(sym_intern_c(st, c"pop") == SYM_POP)
+    assert(sym_intern_c(st, c"ignored") == SYM_IGNORED)
+    assert(sym_intern_c(st, c"fatal") == SYM_FATAL)
+
+    // Mark builtin macros and `defined` operator in sym.flags
+    st.flags.p[u8, zext[usize](SYM_DEFINED)] = SYM_DEFINED_OP
+    for id u32 in SYM___LINE__..(SYM___IS_IDENTIFIER + 1) {
+        st.flags.p[u8, zext[usize](id)] = SYM_BUILTIN
+        sym_active_insert(st, id)
+    }
+
+    // Pre-intern all C23 + GNU C keywords so every keyword has SymId < 256.
+    kw_preintern(st)
+}
+
+fn sym_set_macro(st handle[SymTable], id u32, m addr) void {
+    i usize = zext[usize](id)
+    st.macros.p[addr, i] = m
+    st.macro_epoch += 1
+    if m != null {
+        st.flags.p[u8, i] = (st.flags.p[u8, i] | SYM_MACRO) & ~SYM_UNDEF
+        if st.track_active { sym_active_insert(st, id) }
+    } else {
+        st.flags.p[u8, i] &= ~SYM_MACRO
+    }
+}
+
+fn sym_undef(st handle[SymTable], id u32) void {
+    i usize = zext[usize](id)
+    st.macros.p[addr, i] = null
+    st.flags.p[u8, i] = (st.flags.p[u8, i] & ~SYM_MACRO) | SYM_UNDEF
+    st.macro_epoch += 1
+}
+
+fn sym_is_defined(st handle[SymTable], id u32) bool {
+    f u8 = st.flags.p[u8, zext[usize](id)]
+    if (f & SYM_MACRO) != 0 { return true }
+    if (f & SYM_UNDEF) != 0 { return false }
+    return (f & SYM_BUILTIN) != 0
+}

@@ -106,12 +106,13 @@ let resolve ?stats ?(partial = false) ?(on_input = fun _ -> ())
     Sys.file_exists path
   in
   let paths = List.concat_map Input.paths inputs in
-  if List.length paths > 1024 then Error.fail "input count exceeds 1024 file limit";
+  if List.length paths > E.max_input_files then
+    Error.fail "input count exceeds %d file limit" E.max_input_files;
   let bytes = ref 0 in
   let on_decoded size =
     bytes :=
       Binary.add ~context:"combined input and decoded debug size"
-        ~limit:(256 * 1024 * 1024)
+        ~limit:E.max_input_bytes
         !bytes size;
     Stats.add stats "decoded_debug_bytes" size
   in
@@ -123,12 +124,13 @@ let resolve ?stats ?(partial = false) ?(on_input = fun _ -> ())
     | Some data -> data
     | None ->
         incr file_count;
-        if !file_count > 1024 then Error.fail "input count exceeds 1024 file limit";
+        if !file_count > E.max_input_files then
+    Error.fail "input count exceeds %d file limit" E.max_input_files;
         on_input path;
         let data =
           Stats.measure stats "read" (fun () ->
               File_io.read
-                ~max_size:(min E.max_file_size ((256 * 1024 * 1024) - !bytes))
+                ~max_size:(min E.max_file_size (E.max_input_bytes - !bytes))
                 path)
         in
         bytes := !bytes + String.length data;
@@ -144,12 +146,13 @@ let resolve ?stats ?(partial = false) ?(on_input = fun _ -> ())
   let input_contents = Hashtbl.create ~random:true 16 in
   let read_input path =
     incr file_count;
-    if !file_count > 1024 then Error.fail "input count exceeds 1024 file limit";
+    if !file_count > E.max_input_files then
+    Error.fail "input count exceeds %d file limit" E.max_input_files;
     on_input path;
     let data =
       Stats.measure stats "read" (fun () ->
           let canonical = Unix.realpath path in
-          let max_size = min E.max_file_size ((256 * 1024 * 1024) - !bytes) in
+          let max_size = min E.max_file_size (E.max_input_bytes - !bytes) in
           match Hashtbl.find_opt input_contents canonical with
           | Some data ->
               if String.length data > max_size then
@@ -194,7 +197,7 @@ let resolve ?stats ?(partial = false) ?(on_input = fun _ -> ())
     | Input.Object { path; data } ->
         bytes :=
           Binary.add ~context:"combined input size"
-            ~limit:(256 * 1024 * 1024)
+            ~limit:E.max_input_bytes
             !bytes (String.length data);
         Stats.add stats "input_bytes" (String.length data);
         Stats.add stats "in_memory_objects" 1;

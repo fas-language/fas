@@ -1,0 +1,709 @@
+// cc2/sema_init.fas: Initializer parsing, designators, constexpr validation, and constant folding.
+
+struct InitResult {
+    ty u32
+    tree handle[Ast]
+}
+
+fn se_char_array(ty u32, from u32) bool {
+    if !ty_is_array(ty) || !ty_is_array(from) { return false }
+    x u32 = ty_unqual(ty_node(ty_unqual(ty)).elem)
+    y u32 = ty_unqual(ty_node(ty_unqual(from)).elem)
+    if x == y { return true }
+    return (y == TY_CHAR || y == TY_UCHAR) && (x == TY_CHAR || x == TY_UCHAR || x == TY_SCHAR)
+}
+
+fn se_aggregate_literal_init(p handle[Parser], ty u32, e handle[Ast], constant bool) bool {
+    return constant && pa_is_gnu(p) && e.kind == ND_COMPOUND &&
+        (ty_is_array(ty) || ty_is_record(ty)) && ty_compatible(ty_unqual(ty), ty_unqual(e.ty))
+}
+
+struct LabelDelta { lhs handle[Label], rhs handle[Label] }
+
+fn se_static_label(p handle[Parser], n handle[Ast]) handle[Label] {
+    if n.kind == ND_CAST && ty_is_integer(n.ty) && ty_int_bits(n.ty) == 64 { n = n.a }
+    while n.kind == ND_CAST && ty_is_ptr(n.ty) { n = n.a }
+    if n.kind != ND_UNARY || n.op_kind != TK_LAND { return null }
+    return handle_from_addr(ast_extra(n))
+}
+
+fn se_label_delta(p handle[Parser], n handle[Ast], out handle[LabelDelta]) bool {
+    if n.kind != ND_BINARY || n.op_kind != TK_MINUS { return false }
+    if ty_is_ptr(n.a.ty) && ty_size(ty_node(ty_unqual(n.a.ty)).elem) > 1 { return false }
+    out.lhs = se_static_label(p, n.a)
+    out.rhs = se_static_label(p, n.b)
+    return out.lhs != null && out.rhs != null
+}
+
+fn se_initializer_expr(p handle[Parser], ty u32, e handle[Ast], constant bool, out handle[InitResult]) void fails {
+    if constant && ty_is_record(e.ty) {
+        folded handle[Ast] = se_const_lvalue(p, e, null, false)
+        if folded != null { e = folded }
+    }
+    out.tree = e
+    out.ty = if ty == TY_INVALID { e.ty } else { ty }
+    if e.kind == ND_STRING && se_char_array(ty, e.ty) {
+        n handle[TypeNode] = ty_node(ty_unqual(ty))
+        if n.aux1 == ARR_INCOMPLETE { out.ty = ty_array(n.elem, e.value) }
+        else if n.aux1 == ARR_FIXED && n.arr_len < e.value - 1 {
+            try pa_init_warning(p, e.loc, c"string literal is too long for initialized array")
+        }
+    } else if se_aggregate_literal_init(p, ty, e, constant) {
+        if ty_is_array(ty) {
+            dst handle[TypeNode] = ty_node(ty_unqual(ty))
+            src handle[TypeNode] = ty_node(ty_unqual(e.ty))
+            if dst.aux1 == ARR_INCOMPLETE && src.aux1 == ARR_FIXED {
+                out.ty = ty_array(dst.elem, src.arr_len)
+            }
+        }
+        out.tree = e.a
+        e = e.a
+    } else {
+        if ty_is_array(ty) { try pa_error(p, e.loc, c"array requires a brace or string initializer") }
+        try se_conversion(p, ty, e)
+        out.tree = se_convert(p, ty, e)
+    }
+    if constant && (e.flags & NF_OVERFLOW) != 0 {
+        try pa_error(p, e.loc, c"invalid arithmetic or signed overflow in constant initializer")
+    }
+    if constant && ty_is_integer(ty) && ty_int_bits(ty) > 64 && (e.flags & NF_INT_VALUE) == 0 {
+        candidate handle[Ast] = e
+        while candidate.kind == ND_CAST && ty_is_integer(candidate.ty) { candidate = candidate.a }
+        delta LabelDelta = {}
+        if se_label_delta(p, candidate, &delta) {
+            try pa_error(p, e.loc, c"static label difference cannot initialize a wider-than-pointer integer")
+        }
+    }
+    if constant && ((e.flags & NF_STATIC) == 0 || ((e.flags & NF_LVALUE) != 0 && !ty_is_array(e.ty) &&
+        e.kind != ND_STRING && e.kind != ND_COMPOUND && (e.flags & (NF_INT_VALUE | NF_FLOAT_CONST)) == 0)) {
+        try pa_error(p, e.loc, c"initializer is not a constant expression")
+    }
+}
+
+fn se_aggregate(ty u32) bool { return ty_is_array(ty) || ty_is_record(ty) || ty_is_vector(ty) }
+
+fn se_init_count(ty u32) u64 {
+    n handle[TypeNode] = ty_node(ty_unqual(ty))
+    if n.kind == TYK_ARRAY {
+        if n.aux1 == ARR_INCOMPLETE { return ~0 }
+        return n.arr_len
+    }
+    if n.kind == TYK_VECTOR { return zext[u64](n.aux1) / ty_size(n.elem) }
+    if n.kind == TYK_STRUCT || n.kind == TYK_UNION { return zext[u64](ty_record(n.aux1).fields_len) }
+    return 1
+}
+
+fn se_init_elem(ty u32, index u64) u32 {
+    n handle[TypeNode] = ty_node(ty_unqual(ty))
+    if n.kind == TYK_ARRAY || n.kind == TYK_VECTOR { return n.elem }
+    if n.kind == TYK_STRUCT || n.kind == TYK_UNION { return ty_field(ty_record(n.aux1).fields_start + trunc[u32](index)).ty }
+    return ty
+}
+
+struct ConstPath { index u64, rest handle[ConstPath] }
+
+struct StringBytes {
+    piece handle[Ast]
+    text Bytes
+    pos usize
+    encoded Buf
+    pending usize
+}
+
+fn se_next_string_byte(p handle[Parser], s handle[StringBytes]) u8 fails {
+    if s.pending < s.encoded.n {
+        byte u8 = s.encoded.p[u8, s.pending]
+        s.pending += 1
+        return byte
+    }
+    while s.piece != null {
+        if s.pos == 0 {
+            s.text = sym_name(&p.ctx.syms, s.piece.op)
+            s.pos = if s.text.p[u8] == 34 { 1 } else { 3 }
+        }
+        if s.pos + 1 >= s.text.n {
+            s.piece = s.piece.next
+            s.pos = 0
+            continue
+        }
+        ch u8 = s.text.p[u8, s.pos]
+        s.pos += 1
+        if ch != 92 { return ch }
+        kind u8 = s.text.p[u8, s.pos]
+        e Escape = try expr_escape(p.ctx, bytes_from(s.text, s.pos), s.piece.loc)
+        s.pos += e.width
+        if kind == 117 || kind == 85 || kind == 78 {
+            s.encoded.n = 0
+            utf8_append(&s.encoded, e.cp)
+            s.pending = 1
+            return s.encoded.p[u8]
+        }
+        return trunc[u8](e.cp)
+    }
+    return 0
+}
+
+fn se_string_byte(p handle[Parser], n handle[Ast], index u64, elem u32) handle[Ast] {
+    if ty_size(elem) != 1 { return null }
+    if index >= n.value - 1 { return se_int(p, n.loc, elem, 0) }
+    if n.a == null {
+        s Bytes = sym_name(&p.ctx.syms, n.op)
+        return se_int(p, n.loc, elem, zext[u64](s.p[u8, index]))
+    }
+    cursor StringBytes = {}
+    cursor.piece = n.a
+    defer { buf_free(&cursor.encoded) }
+    for i u64 in 0..index {
+        se_next_string_byte(p, &cursor) catch { return null }
+    }
+    byte u8 = se_next_string_byte(p, &cursor) catch { return null }
+    return se_int(p, n.loc, elem, zext[u64](byte))
+}
+
+fn se_builtin_strcmp(p handle[Parser], loc u32, a handle[Ast], b handle[Ast]) handle[Ast] fails {
+    if a.kind != ND_STRING || b.kind != ND_STRING || a.a == null || b.a == null ||
+        ty_node(ty_unqual(a.ty)).elem != TY_CHAR || ty_node(ty_unqual(b.ty)).elem != TY_CHAR { return null }
+    x StringBytes = {}
+    x.piece = a.a
+    y StringBytes = {}
+    y.piece = b.a
+    defer { buf_free(&x.encoded); buf_free(&y.encoded) }
+    while true {
+        m u8 = try se_next_string_byte(p, &x)
+        n u8 = try se_next_string_byte(p, &y)
+        if m != n { return se_int(p, loc, TY_INT, if m < n { ~0 } else { 1 }) }
+        if m == 0 { return se_int(p, loc, TY_INT, 0) }
+    }
+}
+
+fn se_const_value(p handle[Parser], ty u32, init handle[Ast], path handle[ConstPath]) handle[Ast] {
+    return se_const_value_after(p, ty, init, path, null)
+}
+
+fn se_const_value_after(p handle[Parser], ty u32, init handle[Ast], path handle[ConstPath], previous handle[Ast]) handle[Ast] {
+    if path == null {
+        if init != null { return init }
+        if ty_is_integer(ty) { return se_int(p, 0, ty, 0) }
+        if ty_is_real_float(ty) || ty_is_complex(ty) {
+            n handle[Ast] = pa_node(p, ND_FLOAT, 0, ty)
+            se_set_fp(n, 0.0)
+            return n
+        }
+        return null
+    }
+    if path.index >= se_init_count(ty) { return null }
+    elem u32 = se_init_elem(ty, path.index)
+    if init != null && init.kind == ND_STRING && path.rest == null && ty_is_array(ty) {
+        return se_string_byte(p, init, path.index, elem)
+    }
+    union_type bool = ty_kind(ty) == TYK_UNION
+    result handle[Ast] = if !union_type || path.index == se_init_next(ty, 0) {
+        se_const_value(p, elem, null, path.rest)
+    } else { null }
+    if init == null { return result }
+    if (init.flags & NF_PARTIAL_INIT) != 0 && previous != null { result = previous }
+    if init.kind != ND_INIT { return null }
+    item handle[Ast] = init.a
+    while item != null {
+        designator handle[Ast] = item.b
+        if designator == null {
+            if item.value == path.index { result = se_const_value_after(p, elem, item.a, path.rest, result) }
+            else if union_type { result = null }
+        } else {
+            query handle[ConstPath] = path
+            target u32 = elem
+            matched bool = true
+            while designator != null {
+                lo u64 = designator.value
+                if designator.b != null {
+                    index handle[Ast] = designator.a
+                    lo = index.value
+                }
+                if query == null || query.index < lo || query.index > designator.value {
+                    matched = false
+                    break
+                }
+                target = designator.ty
+                query = query.rest
+                designator = designator.next
+            }
+            if matched { result = se_const_value_after(p, target, item.a, query, result) }
+            else if union_type && item.value != path.index { result = null }
+        }
+        item = item.next
+    }
+    return result
+}
+
+fn se_const_lvalue(p handle[Parser], n handle[Ast], path handle[ConstPath], gnu bool) handle[Ast] {
+    if n.kind == ND_NAME {
+        s handle[Symbol] = n.decl
+        if s != null && s.value != null && (s.storage == SC_CONSTEXPR || gnu) {
+            return se_const_value(p, s.ty, handle_from_addr(s.value), path)
+        }
+    } else if n.kind == ND_COMPOUND && n.op == zext[u32](SC_CONSTEXPR) {
+        return se_const_value(p, n.ty, n.a, path)
+    } else if n.kind == ND_STRING && gnu {
+        return se_const_value(p, n.ty, n, path)
+    } else if n.kind == ND_MEMBER {
+        base handle[Ast] = n.a
+        if !ty_is_record(base.ty) { return null }
+        r handle[RecordDef] = ty_record(ty_node(ty_unqual(base.ty)).aux1)
+        if n.op < r.fields_start || n.op - r.fields_start >= r.fields_len { return null }
+        index ConstPath = {zext[u64](n.op - r.fields_start), path}
+        return se_const_lvalue(p, base, &index, gnu)
+    } else if n.kind == ND_SUBSCRIPT {
+        base handle[Ast] = n.a
+        subscript handle[Ast] = n.b
+        if !ty_is_array(base.ty) || (subscript.flags & NF_ICE) == 0 || ast_wide(subscript) != null { return null }
+        index ConstPath = {subscript.value, path}
+        return se_const_lvalue(p, base, &index, gnu)
+    }
+    return null
+}
+
+fn se_const_load(p handle[Parser], n handle[Ast]) void {
+    if !ty_is_scalar(n.ty) { return }
+    value handle[Ast] = se_const_lvalue(p, n, null, false)
+    if value != null { se_cast_constant(p, n, value); return }
+    base handle[Ast] = n.a
+    literal bool = n.kind == ND_SUBSCRIPT && base.kind == ND_STRING
+    if !pa_is_gnu(p) || (!literal && (ty_quals(n.ty) & (Q_CONST | Q_VOLATILE | Q_ATOMIC)) != Q_CONST) { return }
+    value = se_const_lvalue(p, n, null, true)
+    if value != null && (value.flags & (NF_INT_VALUE | NF_FLOAT_CONST)) != 0 {
+        se_cast_constant(p, n, value)
+        if (n.flags & NF_ICE) != 0 { n.flags = (n.flags & ~NF_ICE) | NF_FOLD }
+    }
+}
+
+fn se_constexpr_type(p handle[Parser], ty u32, loc u32) void fails {
+    if (ty_quals(ty) & (Q_VOLATILE | Q_ATOMIC | Q_RESTRICT)) != 0 {
+        try pa_error(p, loc, c"constexpr object has a disallowed type qualifier")
+    }
+    n handle[TypeNode] = ty_node(ty_unqual(ty))
+    if n.kind == TYK_ARRAY {
+        try se_constexpr_type(p, n.elem, loc)
+    } else if n.kind == TYK_STRUCT || n.kind == TYK_UNION {
+        r handle[RecordDef] = ty_record(n.aux1)
+        for i u32 in 0..r.fields_len {
+            f handle[FieldDef] = ty_field(r.fields_start + i)
+            try se_constexpr_type(p, f.ty, loc)
+        }
+    }
+}
+
+fn se_constexpr_float_fits(p handle[Parser], ty u32, source handle[Ast]) bool {
+    real u32 = ty_real_part(source.ty)
+    if ty == real { return true }
+    f FloatFormat = flt_format(ty)
+    if ty_is_integer(source.ty) && (source.flags & NF_INT_VALUE) != 0 { return flt_integer_fits(f, source) }
+    if (source.flags & NF_FLOAT_CONST) == 0 { return true }
+    if source.kind == ND_CALL {
+        callee handle[Ast] = source.a
+        if callee.kind == ND_NAME && callee.decl == null {
+            name Bytes = sym_name(&p.ctx.syms, callee.op)
+            if bytes_starts_with(name, bytes_c(c"__builtin_nans")) { return false }
+            if bytes_eq_c(name, c"__builtin_complex") {
+                first handle[Ast] = source.b
+                return se_constexpr_float_fits(p, ty, first) && se_constexpr_float_fits(p, ty, first.next)
+            }
+        }
+    }
+    bits FloatBits = {}
+    if !ty_is_complex(source.ty) {
+        return !flt_quad_const(source, &bits) || flt_quad_fits(f, bits)
+    }
+    if real == TY_LDOUBLE || real == TY_FLOAT128 { return true }
+    part Ast = {}
+    part.ty = real
+    part.flags = NF_FLOAT_CONST
+    part.value = source.value
+    if flt_quad_const(&part, &bits) && !flt_quad_fits(f, bits) { return false }
+    part.value = ast_imag(source)
+    return !flt_quad_const(&part, &bits) || flt_quad_fits(f, bits)
+}
+
+fn se_check_constexpr(p handle[Parser], dest u32, e handle[Ast]) void fails {
+    if e.kind == ND_INIT {
+        item handle[Ast] = e.a
+        while item != null {
+            d handle[Ast] = item.b
+            ty u32 = if d == null { se_init_elem(dest, item.value) } else { d.ty }
+            while d != null {
+                ty = d.ty
+                d = d.next
+            }
+            try se_check_constexpr(p, ty, item.a)
+            item = item.next
+        }
+        return
+    }
+    if e.kind == ND_STRING && se_char_array(dest, e.ty) {
+        to u32 = ty_node(ty_unqual(dest)).elem
+        from u32 = ty_node(ty_unqual(e.ty)).elem
+        if ty_is_unsigned(to) != ty_is_unsigned(from) {
+            cursor StringBytes = {}
+            cursor.piece = e.a
+            defer { buf_free(&cursor.encoded) }
+            for i u64 in 0..e.value {
+                if i >= se_init_count(dest) { break }
+                if try se_next_string_byte(p, &cursor) >= 128 {
+                    try pa_error(p, e.loc, c"constexpr string element is not exactly representable")
+                }
+            }
+        }
+        return
+    }
+    if ty_is_integer(e.ty) && (e.flags & NF_ICE) == 0 {
+        try pa_error(p, e.loc, c"constexpr integer initializer is not an integer constant expression")
+    }
+    if ty_is_ptr(e.ty) && (e.flags & NF_ICE) == 0 {
+        try pa_error(p, e.loc, c"constexpr pointer initializer must be null")
+    }
+    if e.kind != ND_CAST || (e.flags & NF_IMPLICIT) == 0 { return }
+    source handle[Ast] = e.a
+    if ty_is_real_float(ty_real_part(e.ty)) && !se_constexpr_float_fits(p, ty_real_part(e.ty), source) {
+        try pa_error(p, source.loc, c"constexpr initializer is not exactly representable")
+    }
+    if (source.flags & NF_ICE) != 0 && (e.flags & NF_ICE) != 0 &&
+        ty_is_integer(source.ty) && ty_is_integer(e.ty) {
+        a u32 = ty_int_bits(source.ty)
+        b u32 = ty_int_bits(e.ty)
+        width u32 = (if a > b { a } else { b }) + 1
+        wa WideInt = wi_from_ast(source, width)
+        wb WideInt = wi_from_ast(e, width)
+        diff bool = wi_cmp(wa, wb) != 0
+        heap_free(wa.p)
+        heap_free(wb.p)
+        if diff {
+            try pa_error(p, source.loc, c"constexpr initializer is not exactly representable")
+        }
+    }
+}
+
+fn se_init_next(ty u32, index u64) u64 {
+    if ty_kind(ty) == TYK_UNION {
+        if index == 0 { return 0 }
+        return se_init_count(ty)
+    }
+    if ty_kind(ty) != TYK_STRUCT { return index }
+    n handle[TypeNode] = ty_node(ty_unqual(ty))
+    r handle[RecordDef] = ty_record(n.aux1)
+    while index < zext[u64](r.fields_len) {
+        f handle[FieldDef] = ty_field(r.fields_start + trunc[u32](index))
+        if !f.is_bitfield || f.name_id != 0 { break }
+        index += 1
+    }
+    return index
+}
+
+struct Designation {
+    first handle[Ast]
+    ty u32
+    index u64
+}
+
+fn pa_designators(p handle[Parser], ty u32, d handle[Designation]) void fails {
+    list AstList = {}
+    colon bool = false
+    plain_subscript bool = false
+    while true {
+        t Token = p.cur
+        idx u64 = 0
+        next_ty u32 = TY_INVALID
+        a handle[Ast] = null
+        b handle[Ast] = null
+        op_sym u32 = 0
+        if try pa_accept_k(p, TK_LBRACK) {
+            plain_subscript = list.first == null
+            if !ty_is_array(ty) { try pa_error(p, t.loc, c"array designator on a non-array initializer") }
+            next_ty = ty_node(ty_unqual(ty)).elem
+            a = try pa_expression(p, 3)
+            idx = try se_ice(p, a)
+            if try pa_accept_k(p, TK_ELLIPSIS) {
+                try pa_gnu(p, t)
+                b = try pa_expression(p, 3)
+                hi u64 = try se_ice(p, b)
+                if hi < idx { try pa_error(p, t.loc, c"empty array designator range") }
+                idx = hi
+            }
+            if idx >= se_init_count(ty) { try pa_error(p, t.loc, c"array designator index out of bounds") }
+            try pa_expect_k(p, TK_RBRACK)
+            op_sym = p.punct_syms[zext[usize](TK_LBRACK)]
+        } else if t.kind == TK_DOT || (pa_is_gnu(p) && t.kind == TK_IDENT && (try pa_at2_k(p, TK_COLON))) {
+            plain_subscript = false
+            old bool = t.kind != TK_DOT
+            if !old { try pa_bump(p) }
+            name u32 = try pa_ident(p, try pa_take(p))
+            if old { try pa_expect_k(p, TK_COLON); colon = true }
+            field FieldLookup = {}
+            if !ty_is_record(ty) || !se_complete(ty) || !ty_offsetof(ty, name, &field) { try pa_error(p, t.loc, c"unknown member in initializer designator") }
+            next_ty = field.ty
+            record handle[RecordDef] = ty_record(ty_node(ty_unqual(ty)).aux1)
+            start u32 = record.fields_start
+            idx = zext[u64](field.field_idx - start)
+            while idx >= zext[u64](record.fields_len) {
+                idx = 0
+                for i u32 in 0..record.fields_len {
+                    f handle[FieldDef] = ty_field(start + i)
+                    sub FieldLookup = {}
+                    if !f.is_anon || !ty_offsetof(f.ty, name, &sub) { continue }
+                    if list.first == null { d.index = zext[u64](i) }
+                    anon handle[Ast] = pa_node(p, ND_DESIGNATOR, t.loc, f.ty)
+                    anon.value = zext[u64](i)
+                    pa_append(&list, anon)
+                    record = ty_record(ty_node(ty_unqual(f.ty)).aux1)
+                    start = record.fields_start
+                    idx = zext[u64](sub.field_idx - start)
+                    break
+                }
+            }
+            op_sym = name
+        } else { break }
+        if list.first == null { d.index = idx }
+        item handle[Ast] = pa_node(p, ND_DESIGNATOR, t.loc, next_ty)
+        item.op = op_sym
+        item.value = idx
+        item.a = a
+        item.b = b
+        pa_append(&list, item)
+        ty = next_ty
+        if colon { break }
+    }
+    d.ty = ty
+    d.first = list.first
+    if d.first != null && !colon && !(pa_is_gnu(p) && plain_subscript) { try pa_expect_k(p, TK_ASSIGN) }
+    else if plain_subscript { try pa_accept_k(p, TK_ASSIGN) }
+}
+
+fn pa_next_designator(p handle[Parser], ty u32, current handle[Ast], outermost bool) handle[Ast] {
+    if current.next != null {
+        child handle[Ast] = pa_next_designator(p, current.ty, current.next, false)
+        if child != null {
+            next handle[Ast] = pa_node(p, ND_DESIGNATOR, current.loc, current.ty)
+            next.op = current.op
+            next.value = current.value
+            next.next = child
+            return next
+        }
+    }
+    if outermost { return null }
+    index u64 = se_init_next(ty, current.value + 1)
+    if index >= se_init_count(ty) { return null }
+    next handle[Ast] = pa_node(p, ND_DESIGNATOR, current.loc, se_init_elem(ty, index))
+    next.value = index
+    return next
+}
+
+fn pa_list_more(p handle[Parser]) bool fails {
+    if p.cur.kind != TK_COMMA { return false }
+    t Token = try pa_peek2(p)
+    return t.kind != TK_RBRACE && t.kind != TK_DOT && t.kind != TK_LBRACK
+}
+
+fn pa_init_element(p handle[Parser], ty u32, constant bool, out handle[InitResult]) void fails {
+    if p.cur.kind == TK_LBRACE { try pa_initializer(p, ty, constant, out); return }
+    e handle[Ast] = try pa_expression(p, 2)
+    try pa_init_elided(p, ty, constant, e, out)
+}
+
+fn pa_init_elided(p handle[Parser], ty u32, constant bool, e handle[Ast], out handle[InitResult]) void fails {
+    if !se_aggregate(ty) || (ty_is_record(ty) && ty_compatible(ty_unqual(ty), ty_unqual(e.ty))) ||
+        (e.kind == ND_STRING && se_char_array(ty, e.ty)) || (ty_is_vector(ty) && ty_compatible(ty, e.ty)) ||
+        se_aggregate_literal_init(p, ty, e, constant) {
+        try se_initializer_expr(p, ty, e, constant, out)
+        return
+    }
+    idx u64 = se_init_next(ty, 0)
+    count u64 = se_init_count(ty)
+    if idx >= count { try pa_error(p, e.loc, c"excess elements in aggregate initializer") }
+    elem InitResult = {}
+    try pa_init_elided(p, se_init_elem(ty, idx), constant, e, &elem)
+    xs AstList = {}
+    pa_add_init(p, &xs, elem.tree, null, idx)
+    idx = se_init_next(ty, idx + 1)
+    while idx < count && (try pa_list_more(p)) {
+        try pa_bump(p)
+        try pa_init_element(p, se_init_elem(ty, idx), constant, &elem)
+        pa_add_init(p, &xs, elem.tree, null, idx)
+        idx = se_init_next(ty, idx + 1)
+    }
+    out.ty = ty
+    if ty_is_array(ty) {
+        array handle[TypeNode] = ty_node(ty_unqual(ty))
+        if array.aux1 == ARR_INCOMPLETE { out.ty = ty_array(array.elem, idx) }
+    }
+    tree handle[Ast] = pa_node(p, ND_INIT, e.loc, out.ty)
+    out.tree = tree
+    tree.a = xs.first
+    tree.flags |= NF_PARTIAL_INIT
+    if se_static_init_items(xs.first) { tree.flags |= NF_STATIC }
+}
+
+fn se_static_init_items(item handle[Ast]) bool {
+    while item != null {
+        value handle[Ast] = item.a
+        if (value.flags & (NF_STATIC | NF_OVERFLOW)) != NF_STATIC { return false }
+        item = item.next
+    }
+    return true
+}
+
+fn pa_add_init(p handle[Parser], xs handle[AstList], e handle[Ast], designators handle[Ast], idx u64) void {
+    item handle[Ast] = pa_node(p, ND_INIT, e.loc, e.ty)
+    item.a = e
+    item.b = designators
+    item.value = idx
+    pa_append(xs, item)
+}
+
+fn pa_init_warning(p handle[Parser], loc u32, msg addr) void fails {
+    if !pa_is_gnu(p) { try pa_error(p, loc, msg) }
+    cc_diag(p.ctx, loc, c"warning: ", bytes_c(msg))
+}
+
+fn pa_discard_init(p handle[Parser]) void fails {
+    if !(try pa_accept_k(p, TK_LBRACE)) { try pa_expression(p, 2); return }
+    while p.cur.kind != TK_RBRACE {
+        designated bool = false
+        while true {
+            if try pa_accept_k(p, TK_DOT) {
+                try pa_ident(p, try pa_take(p))
+            } else if try pa_accept_k(p, TK_LBRACK) {
+                try se_require_ice(p, try pa_expression(p, 3))
+                if try pa_accept_k(p, TK_ELLIPSIS) { try se_require_ice(p, try pa_expression(p, 3)) }
+                try pa_expect_k(p, TK_RBRACK)
+            } else { break }
+            designated = true
+        }
+        if designated { try pa_accept_k(p, TK_ASSIGN) }
+        else if p.cur.kind == TK_IDENT && (try pa_at2_k(p, TK_COLON)) {
+            try pa_ident(p, try pa_take(p))
+            try pa_bump(p)
+        }
+        try pa_discard_init(p)
+        if !(try pa_accept_k(p, TK_COMMA)) { break }
+    }
+    try pa_expect_k(p, TK_RBRACE)
+}
+
+fn se_single_array_init(item handle[Ast]) bool {
+    d handle[Ast] = item.b
+    return (d == null || (d.b == null && d.next == null)) &&
+        (item.a.flags & NF_PARTIAL_INIT) == 0
+}
+
+fn se_prune_array_init(xs handle[AstList]) void {
+    latest Map[u64, addr, u64_hash, u64_eq] = {}
+    defer { map_free(&latest) }
+    item handle[Ast] = xs.first
+    while item != null {
+        if se_single_array_init(item) { map_put(&latest, item.value, handle_addr(item)) }
+        item = item.next
+    }
+    item = xs.first
+    xs.first = null
+    xs.last = null
+    while item != null {
+        next handle[Ast] = item.next
+        if !se_single_array_init(item) || (map_get(&latest, item.value) catch null) == handle_addr(item) {
+            item.next = null
+            pa_append(xs, item)
+        }
+        item = next
+    }
+}
+
+fn pa_initializer(p handle[Parser], ty u32, constant bool, out handle[InitResult]) void fails {
+    t Token = p.cur
+    p.init_depth += 1
+    defer { p.init_depth -= 1 }
+    if se_vla(ty) && (p.cur.kind != TK_LBRACE || !(try pa_at2_k(p, TK_RBRACE))) {
+        try pa_error(p, t.loc, c"a variable length array can only have an empty initializer")
+    }
+    if !(try pa_accept_k(p, TK_LBRACE)) {
+        try se_initializer_expr(p, ty, try pa_expression(p, 2), constant, out)
+        return
+    }
+    if ty == TY_INVALID { try pa_error(p, t.loc, c"auto cannot infer a type from a brace initializer") }
+    n handle[Ast] = pa_node(p, ND_INIT, t.loc, ty)
+    out.tree = n
+    out.ty = ty
+    base handle[TypeNode] = ty_node(ty_unqual(ty))
+    incomplete bool = base.kind == TYK_ARRAY && base.aux1 == ARR_INCOMPLETE
+    elem_ty u32 = base.elem
+    count u64 = se_init_count(ty)
+    idx u64 = se_init_next(ty, 0)
+    max u64 = 0
+    xs AstList = {}
+    continuation handle[Ast] = null
+    designated bool = false
+    while p.cur.kind != TK_RBRACE {
+        d Designation = {}
+        try pa_designators(p, ty, &d)
+        designated = designated || d.first != null
+        if d.first == null && continuation != null {
+            d.first = continuation
+            last handle[Ast] = continuation
+            while last.next != null { last = last.next }
+            d.ty = last.ty
+            d.index = continuation.value
+        }
+        if d.first != null { idx = d.index }
+        elem InitResult = {}
+        tok Token = p.cur
+        if ty_is_array(ty) && idx == 0 && d.first == null && tok.kind != TK_LBRACE {
+            e handle[Ast] = try pa_expression(p, 2)
+            if e.kind == ND_STRING && se_char_array(ty, e.ty) {
+                try se_initializer_expr(p, ty, e, constant, out)
+                try pa_accept_k(p, TK_COMMA)
+                try pa_expect_k(p, TK_RBRACE)
+                return
+            }
+            if idx >= count {
+                try pa_init_warning(p, tok.loc, c"excess elements in initializer")
+                if !(try pa_accept_k(p, TK_COMMA)) { break }
+                continue
+            }
+            try pa_init_elided(p, se_init_elem(ty, idx), constant, e, &elem)
+        } else {
+            if idx >= count {
+                try pa_init_warning(p, tok.loc, c"excess elements in initializer")
+                try pa_discard_init(p)
+                if !(try pa_accept_k(p, TK_COMMA)) { break }
+                continue
+            }
+            dest u32 = if d.first == null { se_init_elem(ty, idx) } else { d.ty }
+            if ty_is_record(ty) && ty_is_array(dest) && ty_node(ty_unqual(dest)).aux1 == ARR_INCOMPLETE &&
+                !(pa_is_gnu(p) && constant && p.init_depth == 1) {
+                try pa_error(p, tok.loc, c"initialization of a nested flexible array member")
+            }
+            try pa_init_element(p, dest, constant, &elem)
+        }
+        pa_add_init(p, &xs, elem.tree, d.first, idx)
+        continuation = null
+        if d.first != null { continuation = pa_next_designator(p, ty, d.first, true) }
+        if idx + 1 > max { max = idx + 1 }
+        idx = se_init_next(ty, idx + 1)
+        if !(try pa_accept_k(p, TK_COMMA)) { break }
+    }
+    try pa_expect_k(p, TK_RBRACE)
+    if incomplete {
+        if max == 0 && !pa_is_gnu(p) { try pa_error(p, t.loc, c"empty initializer cannot complete an unsized array") }
+        out.ty = ty_array(elem_ty, max)
+        n.ty = out.ty
+    }
+    if !constant && designated && base.kind == TYK_ARRAY { se_prune_array_init(&xs) }
+    n.a = xs.first
+    if se_static_init_items(xs.first) { n.flags |= NF_STATIC }
+    if !se_aggregate(ty) && xs.first == null && ty_is_integer(ty) {
+        n.flags |= NF_STATIC | NF_ICE
+    } else if !se_aggregate(ty) && xs.first != null {
+        item handle[Ast] = xs.first
+        e handle[Ast] = item.a
+        n.flags |= e.flags & (NF_ICE | NF_FLOAT_CONST)
+        n.value = e.value
+        if ast_wide(e) != null { ast_set_wide(p, n, ast_wide(e)) }
+        if ast_imag(e) != 0 { ast_set_imag(p, n, ast_imag(e)) }
+    }
+}

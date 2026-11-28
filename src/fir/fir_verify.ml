@@ -5,40 +5,47 @@
 
 open Fir
 
+let ms_sig_problem (s : signature) =
+  if s.ms_abi && List.length s.result_abis > 1 then Some "ms_abi requires at most one result"
+  else if s.ms_xmm_result &&
+    (not s.ms_abi || not (match s.result_abis with [ Agg { size = 16; align = 16; _ } ] -> true | _ -> false))
+  then Some "xmm_result requires an ms_abi signature returning one 16-byte, 16-aligned aggregate"
+  else None
+
 let abi_ty = function Scalar t | Ext (t, _) -> t | Agg _ | Cplx _ -> ptr
 
 (* an agg ABI describes a C struct or union: a size, a power-of-two
    alignment, and scalar fields and nested aggs that lie inside it *)
-let rec abi_problem = function
+let rec abi_problem ~size = function
   | Scalar _ | Ext _ -> None
   | Cplx (F16 | F32 | F64 | F80) -> None
   | Cplx t -> Some (Printf.sprintf "complex %s: a complex is of f16, f32, f64 or f80" (ty_to_string t))
-  | Agg { size; align; fields } ->
-      if size < 0 then Some (Printf.sprintf "agg of %d bytes" size)
+  | Agg { size = bytes; align; fields } ->
+      if bytes < 0 then Some (Printf.sprintf "agg of %d bytes" bytes)
       else if align <= 0 || align land (align - 1) <> 0 then Some (Printf.sprintf "agg alignment %d is not a power of two" align)
       else
         List.find_map
           (fun (o, f) ->
             match f with
             | Leaf t ->
-                if o < 0 || o > size - size_of t then
-                  Some (Printf.sprintf "agg field %s at offset %d is outside its %d bytes" (ty_to_string t) o size)
+                if o < 0 || o > bytes - size t then
+                  Some (Printf.sprintf "agg field %s at offset %d is outside its %d bytes" (ty_to_string t) o bytes)
                 else None
             | Sub (Agg { size = s; _ } as a) ->
-                if o < 0 || o > size - s then
-                  Some (Printf.sprintf "nested agg of %d bytes at offset %d is outside its %d bytes" s o size)
-                else abi_problem a
+                if o < 0 || o > bytes - s then
+                  Some (Printf.sprintf "nested agg of %d bytes at offset %d is outside its %d bytes" s o bytes)
+                else abi_problem ~size a
             | Sub (Scalar _ | Ext _ | Cplx _) -> Some "a nested agg field is not an agg"
             | Complex t -> (
                 match t with
                 | F16 | F32 | F64 | F80 ->
-                    if o < 0 || o > size - (2 * size_of t) then
-                      Some (Printf.sprintf "agg field complex %s at offset %d is outside its %d bytes" (ty_to_string t) o size)
+                    if o < 0 || o > bytes - (2 * size t) then
+                      Some (Printf.sprintf "agg field complex %s at offset %d is outside its %d bytes" (ty_to_string t) o bytes)
                     else None
                 | _ -> Some (Printf.sprintf "complex %s: a complex field is of f16, f32, f64 or f80" (ty_to_string t))))
           fields
 
-let verify_func (f : func) =
+let verify_func ?(size = size_of) funcs (f : func) =
   let errors = ref [] in
   let nerr = ref 0 in
   let err fmt =
@@ -53,11 +60,22 @@ let verify_func (f : func) =
   if f.defined && promises <> 0 then
     [ Printf.sprintf "@%s: memory(...) and willreturn are promises about a declared function" f.name ]
   else if nmem > 1 then [ Printf.sprintf "@%s: more than one memory(...)" f.name ]
+  else if not f.defined && Option.is_some f.unwind_cleanup then
+    [ Printf.sprintf "@%s: !cleanup requires a function body" f.name ]
   else if not f.defined then []
   else if num_blocks f = 0 then [ Printf.sprintf "@%s: no blocks" f.name ]
   else begin
     let nv = num_values f in
     let nb = num_blocks f in
+    Option.iter
+      (fun (b, resume) ->
+        if b <= entry || b >= nb then err "invalid !cleanup block index %d" b
+        else if resume <= b || resume >= nb then err "invalid !cleanup resume block index %d" resume
+        else
+          match (block f entry).term with
+          | Asm_goto { tmpl = ""; labels; _ } when Array.mem b labels -> ()
+          | _ -> err "!cleanup block ^%d is not declared on the entry asm_goto" b)
+      f.unwind_cleanup;
     (* where each value is defined: block and position (-1 = parameter) *)
     let def_block = Array.make nv (-1) and def_pos = Array.make nv (-1) in
     let placed = Array.make (Vec.length f.insts) false in
@@ -86,7 +104,18 @@ let verify_func (f : func) =
                 def_block.(r) <- b;
                 def_pos.(r) <- pos)
               (inst f i).results)
-          br.insts)
+          br.insts;
+        (match br.term with
+        | Asm_goto { aresults; _ } ->
+            Array.iteri
+              (fun k r ->
+                (match def_of f r with
+                | Term_result (b', k') when b' = b && k' = k -> ()
+                | _ -> err "^%d: asm_goto result %d has a wrong definition record" b k);
+                def_block.(r) <- b;
+                def_pos.(r) <- max_int)
+              aresults
+        | _ -> ()))
       f.blocks;
     (* entry parameters follow the signature *)
     let entry_params = (block f entry).params in
@@ -117,7 +146,7 @@ let verify_func (f : func) =
         | Const _ -> ()
         | Unset -> err "%s: use of an undefined value" where
         | Alias _ -> ()
-        | Param _ | Result _ ->
+        | Param _ | Result _ | Term_result _ ->
             let db = def_block.(v) in
             if db < 0 then err "%s: use of a value whose definition is not in any block" where
             else if Fir_dom.reachable d b then
@@ -219,7 +248,9 @@ let verify_func (f : func) =
                 if not (is_float_like t) then err "%s: fcmp on %s" where (ty_to_string t);
                 same "rhs" x t;
                 if nres = 1 && r 0 <> mask_of t then err "%s: fcmp result must be %s" where (ty_to_string (mask_of t));
-                only_flags fl f_fast
+                only_flags fl (f_fast lor f_signaling);
+                if has fl f_signaling && (has fl f_fast || not (has f.fattrs fa_fenv)) then
+                  err "%s: signaling fcmp requires fenv and excludes fast" where
             | Select (cnd, a, x) ->
                 want 1;
                 if nres = 1 then begin
@@ -381,8 +412,9 @@ let verify_func (f : func) =
                   same "mask" m (mask_of (r 0))
                 end
             | Call { sig_; callee; args; attrs = _; va_aggs } ->
+                Option.iter (err "%s: %s" where) (ms_sig_problem sig_);
                 List.iter
-                  (fun a -> Option.iter (err "%s: %s" where) (abi_problem a))
+                  (fun a -> Option.iter (err "%s: %s" where) (abi_problem ~size a))
                   (sig_.param_abis @ sig_.result_abis @ List.map snd va_aggs);
                 let np0 = List.length sig_.param_abis in
                 List.iter
@@ -391,7 +423,13 @@ let verify_func (f : func) =
                     if k < np0 || k >= Array.length args then err "%s: argument %d: an agg ABI is only for variadic arguments" where k
                     else if not (is_ptr (ty args.(k))) then err "%s: agg argument %d is %s, not ptr" where k (tys args.(k)))
                   va_aggs;
-                (match callee with Indirect v -> if not (is_ptr (ty v)) then err "%s: indirect callee is %s" where (tys v) | Direct _ -> ());
+                (match callee with
+                | Indirect v -> if not (is_ptr (ty v)) then err "%s: indirect callee is %s" where (tys v)
+                | Direct name ->
+                    match Hashtbl.find_opt funcs name with
+                    | Some f when f.sig_.ms_abi <> sig_.ms_abi || f.sig_.ms_xmm_result <> sig_.ms_xmm_result ->
+                        err "%s: calling convention mismatch in call to @%s" where name
+                    | _ -> ());
                 let ps = List.map abi_ty sig_.param_abis in
                 let np = List.length ps in
                 if Array.length args < np || ((not sig_.variadic) && Array.length args > np) then
@@ -472,7 +510,7 @@ let verify_func (f : func) =
                 want 1;
                 if not (is_ptr (ty p)) then err "%s: va_arg of %s" where (tys p);
                 (match a with Agg _ | Cplx _ -> () | _ -> err "%s: va_arg with an ABI needs agg or complex" where);
-                Option.iter (err "%s: %s" where) (abi_problem a);
+                Option.iter (err "%s: %s" where) (abi_problem ~size a);
                 if nres = 1 && not (is_ptr (r 0)) then err "%s: va_arg agg defines a ptr" where
             | Trap -> want 0
             | Dbg_value (var, _) -> (
@@ -529,7 +567,7 @@ let verify_func (f : func) =
                 else if Array.length (block f t).params > 0 then
                   err "%s: indirect target ^%d takes parameters" where t)
               bs
-        | Asm_goto { tmpl; aflags; ins; aargs; clobbers; fall; labels } -> (
+        | Asm_goto { tmpl; aflags; outs; ins; aargs; aresults; clobbers; fall; labels } -> (
             (* the fall-through and every label: plain blocks without parameters *)
             Array.iter
               (fun t ->
@@ -539,22 +577,48 @@ let verify_func (f : func) =
               (Array.append [| fall |] labels);
             let pairs l = Array.map (fun (o : asm_operand) -> (o.aname, o.acon)) l in
             match
-              Fir_asm.parse ~labels:(Array.length labels) ~intel:(aflags land asm_intel <> 0) ~tmpl ~outs:[||]
+              Fir_asm.parse ~labels:(Array.length labels) ~intel:(aflags land asm_intel <> 0) ~tmpl ~outs:(pairs outs)
                 ~ins:(pairs ins) ~clobbers
             with
             | exception Fir_asm.Bad m -> err "%s: %s" where m
             | st ->
                 if aflags land lnot (asm_volatile lor asm_intel) <> 0 then err "%s: unknown asm flags" where;
-                if Array.length aargs <> Array.length ins then
-                  err "%s: asm_goto takes %d values, its operands need %d" where (Array.length aargs)
-                    (Array.length ins)
+                let rtys = ref [] in
+                Array.iteri
+                  (fun k (o : asm_operand) ->
+                    let c = st.outs.(k) in
+                    if c.flag <> None && o.aty <> i1 then err "%s: asm_goto flag output %d must be i1" where k;
+                    if Fir_asm.output_is_result c then rtys := o.aty :: !rtys)
+                  outs;
+                let rtys = List.rev !rtys in
+                if List.length rtys <> Array.length aresults then
+                  err "%s: asm_goto defines %d values, its outputs give %d" where (Array.length aresults) (List.length rtys)
                 else
-                  Array.iteri
-                    (fun k (o : asm_operand) ->
-                      if st.ins.(k).tied <> None then err "%s: asm_goto input %d is tied, with no outputs" where k
-                      else same (Printf.sprintf "asm value %d" k) aargs.(k)
-                          (if Fir_asm.indirect st.ins.(k) then ptr else o.aty))
-                    ins)
+                  List.iteri
+                    (fun k t -> if ty_of f aresults.(k) <> t then err "%s: asm_goto result %d type" where k)
+                    rtys;
+                let want_args = ref [] in
+                Array.iteri
+                  (fun k (o : asm_operand) ->
+                    let c = st.outs.(k) in
+                    if Fir_asm.output_takes_arg c then
+                      want_args := (if Fir_asm.indirect c then ptr else o.aty) :: !want_args)
+                  outs;
+                Array.iteri
+                  (fun k (o : asm_operand) ->
+                    let c = st.ins.(k) in
+                    want_args := (if Fir_asm.indirect c then ptr else o.aty) :: !want_args;
+                    match c.tied with
+                    | Some t when outs.(t).aty <> o.aty ->
+                        err "%s: asm_goto input %d is %s but is tied to output %d of %s" where k
+                          (ty_to_string o.aty) t (ty_to_string outs.(t).aty)
+                    | _ -> ())
+                  ins;
+                let want_args = List.rev !want_args in
+                if List.length want_args <> Array.length aargs then
+                  err "%s: asm_goto takes %d values, its operands need %d" where (Array.length aargs)
+                    (List.length want_args)
+                else List.iteri (fun k t -> same (Printf.sprintf "asm value %d" k) aargs.(k) t) want_args)
         | Ret vs ->
             let rts = List.map abi_ty f.sig_.result_abis in
             if Array.length vs <> List.length rts then err "%s: returns %d values, signature %d" where (Array.length vs) (List.length rts)
@@ -565,7 +629,12 @@ let verify_func (f : func) =
     List.rev !errors
   end
 
-let verify (m : modul) =
+let verify ?iter_funcs (m : modul) =
+  let i386 = is_i386 m.triple in
+  let size ty =
+    if i386 then match ty with Ptr _ -> 4 | F80 -> 12 | _ -> size_of ty
+    else size_of ty in
+  let iter = Option.value iter_funcs ~default:(fun visit -> Vec.iter visit m.funcs) in
   let names = Hashtbl.create 64 in
   let errs = ref [] in
   let check_name n =
@@ -575,6 +644,7 @@ let verify (m : modul) =
   Vec.iter (fun g -> check_name g.gname) m.globals;
   Vec.iter (fun f -> check_name f.name) m.funcs;
   Vec.iter (fun a -> check_name a.aname) m.aliases;
+  Vec.iter (fun iv -> check_name iv.iname) m.ifuncs;
   (* an alias names a function or global defined here, never another alias
      (so there are no cycles); an addend stays inside a global *)
   Vec.iter
@@ -593,6 +663,22 @@ let verify (m : modul) =
       | None, None -> bad "not a function or global defined in this module")
     m.aliases;
   Vec.iter
+    (fun (iv : ifunc) ->
+      let bad why = errs := Printf.sprintf "ifunc @%s = @%s: %s" iv.iname iv.resolver why :: !errs in
+      match Vec.fold (fun acc f -> if f.name = iv.resolver then Some f else acc) None m.funcs with
+      | None -> bad "resolver is not a function defined in this module"
+      | Some f ->
+          if not f.defined then bad "resolver is only declared";
+          if f.sig_.variadic then bad "resolver may not be variadic";
+          if f.sig_.ms_abi then bad "resolver requires the System V calling convention";
+          (match f.sig_.result_abis with
+          | [ Scalar (Ptr _) ] -> ()
+          | _ -> bad "resolver must return a single ptr");
+          match f.sig_.param_abis with
+          | [] | [ Scalar (Int 64) ] | [ Scalar (Int 64); Scalar (Ptr _) ] -> ()
+          | _ -> bad "resolver parameters must be (), (i64), or (i64, ptr)")
+    m.ifuncs;
+  Vec.iter
     (fun g ->
       if g.galign <= 0 || g.galign land (g.galign - 1) <> 0 then
         errs := Printf.sprintf "@%s: alignment %d is not a power of two" g.gname g.galign :: !errs;
@@ -607,20 +693,18 @@ let verify (m : modul) =
       | Some ps ->
           List.iter
             (function
-              | Reloc { sym; width = 4; pcrel = false; _ } ->
+              | Reloc { sym; width = 4; pcrel = false; _ } when not i386 ->
                   errs := Printf.sprintf "@%s: reloc @%s w4 must be pcrel (a 4-byte absolute address is not supported)" g.gname sym :: !errs
               | Reloc { sym; width = 8; pcrel = true; _ } ->
                   errs := Printf.sprintf "@%s: reloc @%s pcrel must be w4" g.gname sym :: !errs
+              | Blockdiff { width; _ } when not (List.mem width [ 1; 2; 4; 8 ]) ->
+                  errs := Printf.sprintf "@%s: blockdiff width must be 1, 2, 4 or 8" g.gname :: !errs
               | _ -> ())
             ps
       | None -> ());
       match g.init with
       | Some ps ->
-          let n =
-            List.fold_left
-              (fun acc p -> acc + match p with Bytes s -> String.length s | Zeros k -> k | Reloc { width; _ } -> width | Blockref _ -> 8)
-              0 ps
-          in
+          let n = List.fold_left (fun acc p -> acc + init_piece_size p) 0 ps in
           if n <> g.size then errs := Printf.sprintf "@%s: initializer is %d bytes, size %d" g.gname n g.size :: !errs
       | None -> ())
     m.globals;
@@ -660,46 +744,49 @@ let verify (m : modul) =
      an indirect_br could enter: not the entry, no parameters *)
   let funcs = Hashtbl.create 64 in
   Vec.iter (fun f -> Hashtbl.replace funcs f.name f) m.funcs;
+  let block_params = Hashtbl.create 64 in
+  let block_refs = ref [] in
+  let index_blocks f =
+    Hashtbl.replace block_params f.name
+      (if f.defined then Some (Array.init (Vec.length f.blocks) (fun b -> Array.length (block f b).params > 0))
+       else None);
+    Hashtbl.iter
+      (fun c _ -> match c with Cblockaddr (g, b) -> block_refs := (f.name, g, b) :: !block_refs | _ -> ())
+      f.consts
+  in
+  let block_errors = ref [] in
   let check_blockaddr owner g b =
-    let bad why = errs := Printf.sprintf "@%s: blockaddr(@%s, %d): %s" owner g b why :: !errs in
-    match Hashtbl.find_opt funcs g with
-    | Some gf when gf.defined ->
-        if b < 0 || b >= Vec.length gf.blocks then bad "no such block"
+    let bad why = block_errors := Printf.sprintf "@%s: blockaddr(@%s, %d): %s" owner g b why :: !block_errors in
+    match Hashtbl.find_opt block_params g with
+    | Some (Some params) ->
+        if b < 0 || b >= Array.length params then bad "no such block"
         else if b = entry then bad "the entry block"
-        else if Array.length (block gf b).params > 0 then bad "the block takes parameters"
+        else if params.(b) then bad "the block takes parameters"
     | _ -> bad "not a function defined in this module"
   in
-  Vec.iter
-    (fun f -> Hashtbl.iter (fun c _ -> match c with Cblockaddr (g, b) -> check_blockaddr f.name g b | _ -> ()) f.consts)
-    m.funcs;
-  Vec.iter
-    (fun g ->
-      match g.init with
-      | Some ps -> List.iter (function Blockref { fn; block } -> check_blockaddr g.gname fn block | _ -> ()) ps
-      | None -> ())
-    m.globals;
   (* location ids index this module's table (0 = none): an id from another
      module's table would name the wrong line, or none *)
   let nlocs = Vec.length m.locs in
-  Vec.iter
-    (fun f ->
-      if f.defined then begin
-        let bad = ref 0 in
-        if f.decl_loc < 0 || f.decl_loc >= nlocs then bad := f.decl_loc;
-        Vec.iter (fun (ir : inst_rec) -> if ir.loc < 0 || ir.loc >= nlocs then bad := ir.loc) f.insts;
-        Vec.iter (fun (b : block_rec) -> if b.term_loc < 0 || b.term_loc >= nlocs then bad := b.term_loc) f.blocks;
-        if !bad <> 0 then
-          errs := Printf.sprintf "@%s: location id %d out of range (%d locations)" f.name !bad (nlocs - 1) :: !errs
-      end)
-    m.funcs;
+  let loc_errors = ref [] in
+  let check_locs f =
+    if f.defined then begin
+      let bad = ref 0 in
+      if f.decl_loc < 0 || f.decl_loc >= nlocs then bad := f.decl_loc;
+      Vec.iter (fun (ir : inst_rec) -> if ir.loc < 0 || ir.loc >= nlocs then bad := ir.loc) f.insts;
+      Vec.iter (fun (b : block_rec) -> if b.term_loc < 0 || b.term_loc >= nlocs then bad := b.term_loc) f.blocks;
+      if !bad <> 0 then
+        loc_errors := Printf.sprintf "@%s: location id %d out of range (%d locations)" f.name !bad (nlocs - 1) :: !loc_errors
+    end
+  in
   (* debug information (roadmap v0.8): every id in range; a scope belongs to
      one function (the function whose locations or variables name it or a
      scope inside it) *)
+  let dtype_errors = ref [] in
   let ntypes = Vec.length m.dtypes and nscopes = Vec.length m.scopes in
   let type_ok t = t >= 0 && t < ntypes in
   Vec.iteri
     (fun i t ->
-      let bad what = errs := Printf.sprintf "dtype %d: %s" i what :: !errs in
+      let bad what = dtype_errors := Printf.sprintf "dtype %d: %s" i what :: !dtype_errors in
       let ref_ok what t = if not (type_ok t) then bad (Printf.sprintf "%s type %d out of range" what t) in
       match t with
       | Dvoid -> if i <> 0 then bad "void is only type 0"
@@ -710,21 +797,25 @@ let verify (m : modul) =
       | Dstruct { size; members; _ } ->
           (match size with Some n when n < 0 -> bad "negative size" | _ -> ());
           List.iter
-            (fun (_, t, o) ->
-              ref_ok "member" t;
-              if t = 0 then bad "a member cannot be void";
-              if o < 0 then bad "negative member offset")
+            (fun m ->
+              ref_ok "member" m.member_type;
+              if m.member_type = 0 then bad "a member cannot be void";
+              if m.member_offset < 0 then bad "negative member offset";
+              Option.iter (fun bits -> if bits <= 0 then bad "nonpositive bitfield width") m.member_bits)
             members
-      | Darray (t, n) | Dvector (t, n) ->
-          ref_ok "element" t;
-          if t = 0 then bad "an element cannot be void";
-          if n < 0 then bad "negative count"
+      | Darray (e, n) | Dvector (e, n) ->
+          ref_ok "element" e;
+          if e = 0 then bad "an element cannot be void";
+          if n < (match t with Darray _ -> -1 | _ -> 0) then bad "negative count"
       | Dtypedef (_, t) -> ref_ok "aliased" t
+      | Dsubroutine (result, params, _) ->
+          ref_ok "result" result;
+          List.iter (fun t -> ref_ok "parameter" t; if t = 0 then bad "a parameter cannot be void") params
       | Denum { base; _ } -> ref_ok "underlying" base)
     m.dtypes;
-  (* DWARF strings are NUL-terminated (DW_FORM_string, the line table's
-     file names), so a name with a NUL byte in it cannot be written *)
-  let nul what s = if String.contains s '\000' then errs := Printf.sprintf "%s %S has a NUL byte" what s :: !errs in
+  (* DWARF strings are NUL-terminated, so a name with a NUL byte in it
+     cannot be written. *)
+  let nul what s = if String.contains s '\000' then dtype_errors := Printf.sprintf "%s %S has a NUL byte" what s :: !dtype_errors in
   Vec.iteri (fun i (file, _, _) -> if i > 0 then nul (Printf.sprintf "loc %d: file name" i) file) m.locs;
   Vec.iteri
     (fun i t ->
@@ -733,52 +824,69 @@ let verify (m : modul) =
       | Dbase { name; _ } | Dtypedef (name, _) -> nul "name" name
       | Dstruct { name; members; _ } ->
           nul "name" name;
-          List.iter (fun (m, _, _) -> nul "member" m) members
+          List.iter (fun m -> nul "member" m.member_name) members
       | Denum { name; enumerators; _ } ->
           nul "name" name;
           List.iter (fun (e, _) -> nul "enumerator" e) enumerators
-      | Dvoid | Dpointer _ | Darray _ | Dvector _ -> ())
+      | Dvoid | Dpointer _ | Darray _ | Dvector _ | Dsubroutine _ -> ())
     m.dtypes;
-  Vec.iter
-    (fun f ->
-      Option.iter (nul (Printf.sprintf "@%s: display name" f.name)) f.display;
-      List.iter (fun d -> nul (Printf.sprintf "@%s: var" f.name) d.vname) f.vars)
-    m.funcs;
+  let check_names f =
+    Option.iter (nul (Printf.sprintf "@%s: display name" f.name)) f.display;
+    List.iter (fun d -> nul (Printf.sprintf "@%s: var" f.name) d.vname) f.vars
+  in
+  let loc_scope_errors = ref [] in
   Hashtbl.iter
     (fun l sc ->
-      if l <= 0 || l >= nlocs then errs := Printf.sprintf "loc %d: no such location" l :: !errs;
-      if sc <= 0 || sc >= nscopes then errs := Printf.sprintf "loc %d: scope %d out of range" l sc :: !errs)
+      if l <= 0 || l >= nlocs then loc_scope_errors := Printf.sprintf "loc %d: no such location" l :: !loc_scope_errors;
+      if sc <= 0 || sc >= nscopes then loc_scope_errors := Printf.sprintf "loc %d: scope %d out of range" l sc :: !loc_scope_errors)
     m.loc_scopes;
+  let variable_errors = ref [] in
+  let debug_objects = Hashtbl.create 16 in
+  Vec.iter (fun g -> if g.gdefined then Hashtbl.replace debug_objects g.gname g.thread_local) m.globals;
+  let check_debug_var bad d =
+    if not (type_ok d.vty) then bad (Printf.sprintf "type %d out of range" d.vty);
+    if d.vloc < 0 || d.vloc >= nlocs then bad (Printf.sprintf "location %d out of range" d.vloc);
+    Option.iter (fun (symbol, tls) ->
+      match Hashtbl.find_opt debug_objects symbol with
+      | Some actual when actual = tls -> ()
+      | Some _ -> bad (Printf.sprintf "@%s has a different TLS setting" symbol)
+      | None -> bad (Printf.sprintf "@%s is not a defined object" symbol))
+      d.vsymbol
+  in
+  List.iter (fun d ->
+    nul "dglobal" d.vname;
+    check_debug_var
+      (fun what -> variable_errors := Printf.sprintf "dglobal %S: %s" d.vname what :: !variable_errors)
+      d)
+    m.dglobals;
   let owner = Array.make (max 1 nscopes) "" in
   let claim fname sc =
     let rec up sc =
       if sc > 0 && sc < nscopes then begin
         if owner.(sc) = "" then owner.(sc) <- fname
         else if owner.(sc) <> fname then
-          errs := Printf.sprintf "scope %d is used by both @%s and @%s" sc owner.(sc) fname :: !errs;
+          variable_errors := Printf.sprintf "scope %d is used by both @%s and @%s" sc owner.(sc) fname :: !variable_errors;
         up (Vec.get m.scopes sc)
       end
     in
     up sc
   in
-  Vec.iter
-    (fun f ->
-      if f.defined then begin
-        let seen = Hashtbl.create 8 in
-        let note l = if l > 0 && l < nlocs && not (Hashtbl.mem seen l) then begin
-            Hashtbl.replace seen l ();
-            claim f.name (loc_scope m l)
-          end
-        in
+  let check_vars f =
+    if f.defined then begin
+      let seen = Hashtbl.create 8 in
+      let note l = if l > 0 && l < nlocs && not (Hashtbl.mem seen l) then begin
+          Hashtbl.replace seen l ();
+          claim f.name (loc_scope m l)
+        end
+      in
         Vec.iter (fun (ir : inst_rec) -> note ir.loc) f.insts;
         Vec.iter (fun (b : block_rec) -> note b.term_loc) f.blocks;
         List.iter
           (fun d ->
-            let bad what = errs := Printf.sprintf "@%s: var %S: %s" f.name d.vname what :: !errs in
-            if not (type_ok d.vty) then bad (Printf.sprintf "type %d out of range" d.vty);
+            let bad what = variable_errors := Printf.sprintf "@%s: var %S: %s" f.name d.vname what :: !variable_errors in
+            check_debug_var bad d;
             if d.vscope < 0 || d.vscope >= nscopes then bad (Printf.sprintf "scope %d out of range" d.vscope)
             else claim f.name d.vscope;
-            if d.vloc < 0 || d.vloc >= nlocs then bad (Printf.sprintf "location %d out of range" d.vloc);
             if d.varg < 0 || d.varg > List.length f.sig_.param_abis then
               bad (Printf.sprintf "arg %d out of range" d.varg);
             match d.home with
@@ -793,28 +901,53 @@ let verify (m : modul) =
                   | _, t -> bad ("home must be a pointer, not " ^ ty_to_string t)))
           f.vars
       end
-      else if f.vars <> [] then errs := Printf.sprintf "@%s: a declaration has no variables" f.name :: !errs)
-    m.funcs;
+      else if f.vars <> [] then variable_errors := Printf.sprintf "@%s: a declaration has no variables" f.name :: !variable_errors
+  in
+  let sig_errors = ref [] in
+  let check_sig f =
+    let bad p = sig_errors := Printf.sprintf "@%s: signature: %s" f.name p :: !sig_errors in
+    Option.iter bad (ms_sig_problem f.sig_);
+    List.iter
+      (fun a -> Option.iter bad (abi_problem ~size a))
+      (f.sig_.param_abis @ f.sig_.result_abis);
+    (* a vector constant has one lane per lane of its type, each of the
+       element type *)
+    Hashtbl.iter
+      (fun c v ->
+        match c with
+        | Cvec (t, lanes) ->
+            let bad why = sig_errors := Printf.sprintf "@%s: vector constant %s: %s" f.name (ty_to_string t) why :: !sig_errors in
+            (match t with
+            | Vec (n, e) ->
+                if Array.length lanes <> n then bad (Printf.sprintf "%d lanes given" (Array.length lanes))
+                else if Array.exists (fun l -> ty_of f l <> e) lanes then bad "a lane of another type"
+            | _ -> bad "not a vector type");
+            if ty_of f v <> t then bad "defines a value of another type"
+        | _ -> ())
+      f.consts
+  in
+  let function_errors = ref [] in
+  iter (fun f ->
+    index_blocks f;
+    check_locs f;
+    check_names f;
+    check_vars f;
+    check_sig f;
+    function_errors := List.rev_append (verify_func ~size funcs f) !function_errors);
+  List.iter (fun (f, g, b) -> check_blockaddr f g b) (List.rev !block_refs);
   Vec.iter
-    (fun f ->
-      List.iter
-        (fun a -> Option.iter (fun p -> errs := Printf.sprintf "@%s: signature: %s" f.name p :: !errs) (abi_problem a))
-        (f.sig_.param_abis @ f.sig_.result_abis);
-      (* a vector constant has one lane per lane of its type, each of the
-         element type *)
-      Hashtbl.iter
-        (fun c v ->
-          match c with
-          | Cvec (t, lanes) ->
-              let bad why = errs := Printf.sprintf "@%s: vector constant %s: %s" f.name (ty_to_string t) why :: !errs in
-              (match t with
-              | Vec (n, e) ->
-                  if Array.length lanes <> n then bad (Printf.sprintf "%d lanes given" (Array.length lanes))
-                  else if Array.exists (fun l -> ty_of f l <> e) lanes then bad "a lane of another type"
-              | _ -> bad "not a vector type");
-              if ty_of f v <> t then bad "defines a value of another type"
-          | _ -> ())
-        f.consts)
-    m.funcs;
-  let fs = Vec.fold (fun acc f -> List.rev_append (verify_func f) acc) [] m.funcs in
-  List.rev !errs @ List.rev fs
+    (fun g ->
+      match g.init with
+      | Some ps ->
+          List.iter
+            (function
+              | Blockref { fn; block } -> check_blockaddr g.gname fn block
+              | Blockdiff { fn; lhs; rhs; _ } ->
+                  check_blockaddr g.gname fn lhs;
+                  check_blockaddr g.gname fn rhs
+              | _ -> ())
+            ps
+      | None -> ())
+    m.globals;
+  List.concat (List.map (fun errors -> List.rev !errors)
+    [ errs; block_errors; loc_errors; dtype_errors; loc_scope_errors; variable_errors; sig_errors; function_errors ])

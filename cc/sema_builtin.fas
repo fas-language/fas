@@ -1,0 +1,460 @@
+// cc2/sema_builtin.fas: Builtin function validation, constant folding, and x86 intrinsics.
+
+fn se_math_family(name Bytes, stem addr) u32 {
+    prefix Bytes = bytes_c(stem)
+    if !bytes_starts_with(name, prefix) { return TY_INVALID }
+    suffix Bytes = bytes_from(name, prefix.n)
+    if suffix.n == 0 || bytes_eq_c(suffix, c"f64") { return TY_DOUBLE }
+    if bytes_eq_c(suffix, c"f") || bytes_eq_c(suffix, c"f32") { return TY_FLOAT }
+    if bytes_eq_c(suffix, c"l") { return TY_LDOUBLE }
+    if bytes_eq_c(suffix, c"f16") { return TY_FLOAT16 }
+    return TY_INVALID
+}
+
+fn se_binary_libm_type(name Bytes) u32 {
+    if feature_in(c" __builtin_nextafter __builtin_fmin __builtin_fmax ", name) { return TY_DOUBLE }
+    if feature_in(c" __builtin_nextafterf __builtin_fminf __builtin_fmaxf ", name) { return TY_FLOAT }
+    if feature_in(c" __builtin_nextafterl __builtin_fminl __builtin_fmaxl ", name) { return TY_LDOUBLE }
+    return TY_INVALID
+}
+
+fn se_math_result(name Bytes) u32 {
+    binary_ty u32 = se_binary_libm_type(name)
+    if binary_ty != TY_INVALID { return binary_ty }
+    if !bytes_starts_with(name, bytes_c(c"__builtin_")) { return TY_INVALID }
+    name = bytes_from(name, 10)
+    ty u32 = se_math_family(name, c"conj")
+    if ty != TY_INVALID { return ty_complex(ty) }
+    stems arr[10, addr] = {c"creal", c"cimag", c"copysign", c"fabs", c"fma", c"sqrt", c"inf", c"huge_val", c"nan", c"nans"}
+    for i usize in 0..10 {
+        ty = se_math_family(name, stems[i])
+        if ty != TY_INVALID { return ty }
+    }
+    return TY_INVALID
+}
+
+fn se_builtin_count(p handle[Parser], t Token, n u32, min u32, max u32) void fails {
+    if n < min || n > max { try pa_error(p, t.loc, c"wrong number of builtin arguments") }
+}
+
+fn se_fold_bswap(p handle[Parser], t Token, ty u32, arg handle[Ast]) handle[Ast] {
+    if !ty_is_integer(arg.ty) || (arg.flags & (NF_ICE | NF_OVERFLOW)) != NF_ICE { return null }
+    value u64 = arg.value
+    result u64 = 0
+    for i u64 in 0..ty_size(ty) {
+        result = (result << 8) | (value & 255)
+        value >>= 8
+    }
+    return se_int(p, t.loc, ty, result)
+}
+
+fn se_clz_argument_type(name Bytes) u32 {
+    if bytes_eq_c(name, c"__builtin_clz") { return TY_UINT }
+    if bytes_eq_c(name, c"__builtin_clzl") { return TY_ULONG }
+    if bytes_eq_c(name, c"__builtin_clzll") { return TY_ULLONG }
+    return TY_INVALID
+}
+
+fn se_fold_clz(p handle[Parser], t Token, ty u32, arg handle[Ast]) handle[Ast] {
+    if !ty_is_integer(arg.ty) || (arg.flags & (NF_ICE | NF_OVERFLOW)) != NF_ICE { return null }
+    value u64 = se_convert(p, ty, arg).value
+    if value == 0 { return null }
+    result u64 = zext[u64](ty_int_bits(ty))
+    while value != 0 {
+        result -= 1
+        value >>= 1
+    }
+    return se_int(p, t.loc, TY_INT, result)
+}
+
+fn se_ctz_argument_type(name Bytes) u32 {
+    if bytes_eq_c(name, c"__builtin_ctz") { return TY_UINT }
+    if bytes_eq_c(name, c"__builtin_ctzl") { return TY_ULONG }
+    if bytes_eq_c(name, c"__builtin_ctzll") { return TY_ULLONG }
+    return TY_INVALID
+}
+
+fn se_count_trailing_zeros(value u64) u64 {
+    return ctz(value)
+}
+
+fn se_fold_ctz(p handle[Parser], t Token, ty u32, arg handle[Ast]) handle[Ast] {
+    if !ty_is_integer(arg.ty) || (arg.flags & (NF_ICE | NF_OVERFLOW)) != NF_ICE { return null }
+    value u64 = se_convert(p, ty, arg).value
+    if value == 0 { return null }
+    return se_int(p, t.loc, TY_INT, se_count_trailing_zeros(value))
+}
+
+fn se_ffs_argument_type(name Bytes) u32 {
+    if bytes_eq_c(name, c"__builtin_ffs") { return TY_INT }
+    if bytes_eq_c(name, c"__builtin_ffsl") { return TY_LONG }
+    if bytes_eq_c(name, c"__builtin_ffsll") { return TY_LLONG }
+    return TY_INVALID
+}
+
+fn se_fold_ffs(p handle[Parser], t Token, ty u32, arg handle[Ast]) handle[Ast] {
+    if !ty_is_integer(arg.ty) || (arg.flags & (NF_ICE | NF_OVERFLOW)) != NF_ICE { return null }
+    value u64 = se_convert(p, ty, arg).value
+    if value == 0 { return se_int(p, t.loc, TY_INT, 0) }
+    return se_int(p, t.loc, TY_INT, se_count_trailing_zeros(value) + 1)
+}
+
+fn se_is_ms_va_list(p handle[Parser], e handle[Ast]) bool {
+    if tc.ilp32 { return false }
+    name u32 = sym_intern_c(&p.ctx.syms, c"__builtin_ms_va_list")
+    return ty_compatible(se_decay(e.ty), se_decay(pa_lookup(p, name).ty))
+}
+
+fn se_builtin_va_list(p handle[Parser], e handle[Ast]) void fails {
+    name u32 = sym_intern_c(&p.ctx.syms, c"__builtin_va_list")
+    sysv handle[Symbol] = pa_lookup(p, name)
+    if ty_compatible(se_decay(e.ty), se_decay(sysv.ty)) || se_is_ms_va_list(p, e) { return }
+    try pa_error(p, e.loc, c"variadic builtin requires a va_list argument")
+}
+
+fn se_builtin_overflow(name Bytes) bool {
+    return bytes_eq_c(name, c"__builtin_add_overflow") || bytes_eq_c(name, c"__builtin_sub_overflow") ||
+        bytes_eq_c(name, c"__builtin_mul_overflow")
+}
+
+fn se_builtin_checked(name Bytes) bool {
+    return bytes_eq_c(name, c"__builtin_ckd_add") || bytes_eq_c(name, c"__builtin_ckd_sub") ||
+        bytes_eq_c(name, c"__builtin_ckd_mul")
+}
+
+fn se_stdc_bit_arity(name Bytes) u32 {
+    if !bytes_starts_with(name, bytes_c(c"__builtin_stdc_")) { return 0 }
+    op Bytes = bytes_from(name, 15)
+    if feature_in(c" rotate_left rotate_right ", op) { return 2 }
+    if feature_in(c" bit_ceil bit_floor bit_width count_ones count_zeros first_leading_one first_leading_zero first_trailing_one first_trailing_zero has_single_bit leading_ones leading_zeros trailing_ones trailing_zeros ", op) {
+        return 1
+    }
+    return 0
+}
+
+fn se_check_stdc_bit(p handle[Parser], t Token, args handle[Ast], count u32, arity u32) void fails {
+    try se_builtin_count(p, t, count, arity, arity)
+    ty u32 = ty_unqual(args.ty)
+    if !ty_is_integer(ty) || !ty_is_unsigned(ty) || ty == TY_CHAR || ty_is_bool(ty) || ty_is_enum(ty) {
+        try pa_error(p, args.loc, c"bit builtin requires an unsigned integer operand")
+    }
+    if arity == 2 {
+        shift handle[Ast] = args.next
+        if !ty_is_integer(shift.ty) || ty_is_enum(shift.ty) {
+            try pa_error(p, shift.loc, c"rotate count requires an integer operand")
+        }
+    }
+}
+
+fn se_builtin_type_class(ty u32) u64 {
+    if ty_is_void(ty) { return 0 }
+    if ty_is_bool(ty) { return 4 }
+    if ty_is_integer(ty) { return 1 }
+    if ty_is_ptr(ty) { return 5 }
+    if ty_is_real_float(ty) { return 8 }
+    if ty_is_complex(ty) { return 9 }
+    if ty_kind(ty) == TYK_STRUCT { return 12 }
+    if ty_kind(ty) == TYK_UNION { return 13 }
+    if ty_is_vector(ty) { return 19 }
+    return ~0
+}
+
+fn se_checked_integer(ty u32) bool {
+    return ty_is_integer(ty) && ty_unqual(ty) != TY_CHAR && !ty_is_bool(ty) &&
+        !ty_is_enum(ty) && !ty_is_bitint(ty)
+}
+
+fn se_check_overflow(p handle[Parser], t Token, args handle[Ast], count u32, checked bool) void fails {
+    try se_builtin_count(p, t, count, 3, 3)
+    b handle[Ast] = args.next
+    out handle[Ast] = b.next
+    if !ty_is_integer(args.ty) || !ty_is_integer(b.ty) ||
+        (checked && (!se_checked_integer(args.ty) || !se_checked_integer(b.ty))) {
+        try pa_error(p, t.loc, c"overflow builtin requires integer operands")
+    }
+    ptr u32 = se_decay(out.ty)
+    if !ty_is_ptr(ptr) { try pa_error(p, out.loc, c"overflow builtin result requires a pointer to integer") }
+    elem u32 = ty_node(ty_unqual(ptr)).elem
+    if !ty_is_integer(elem) || ty_is_bool(elem) || ty_is_enum(elem) || (ty_quals(elem) & (Q_CONST | Q_ATOMIC)) != 0 ||
+        (checked && !se_checked_integer(elem)) {
+        try pa_error(p, out.loc, c"invalid integer type for overflow builtin result")
+    }
+}
+
+fn se_builtin_predicate(name Bytes) bool {
+    return bytes_eq_c(name, c"__builtin_isnan") || bytes_eq_c(name, c"__builtin_isinf") ||
+        bytes_eq_c(name, c"__builtin_isinf_sign") || bytes_eq_c(name, c"__builtin_isfinite") ||
+        bytes_eq_c(name, c"__builtin_isnormal") || bytes_eq_c(name, c"__builtin_issignaling")
+}
+
+fn se_builtin_ordered(name Bytes) bool {
+    return bytes_eq_c(name, c"__builtin_isgreater") || bytes_eq_c(name, c"__builtin_isgreaterequal") ||
+        bytes_eq_c(name, c"__builtin_isless") || bytes_eq_c(name, c"__builtin_islessequal") ||
+        bytes_eq_c(name, c"__builtin_islessgreater") || bytes_eq_c(name, c"__builtin_isunordered")
+}
+
+fn se_builtin_alignment(p handle[Parser], e handle[Ast], bits bool) void fails {
+    if !ty_is_integer(e.ty) || (e.flags & (NF_INT_VALUE | NF_OVERFLOW)) != NF_ICE {
+        try pa_error(p, e.loc, c"builtin alignment requires a constant integer")
+    }
+    n u64 = e.value
+    if n == 0 || (n & (n - 1)) != 0 || (bits && n < 8) ||
+        (!ty_is_unsigned(e.ty) && bitcast[i64](n) < 0) {
+        try pa_error(p, e.loc, c"builtin alignment is not a supported power of two")
+    }
+}
+
+fn se_builtin_atomic_fetch(name Bytes) bool {
+    if bytes_starts_with(name, bytes_c(c"__atomic_")) {
+        return bytes_starts_with(name, bytes_c(c"__atomic_fetch_")) || bytes_ends_with(name, bytes_c(c"_fetch"))
+    }
+    return bytes_starts_with(name, bytes_c(c"__sync_fetch_and_")) ||
+        (bytes_starts_with(name, bytes_c(c"__sync_")) && bytes_ends_with(name, bytes_c(c"_and_fetch")))
+}
+
+fn se_builtin_atomic_result(ty u32) u32 {
+    ptr u32 = se_decay(ty)
+    return if ty_is_ptr(ptr) { ty_unqual(ty_node(ptr).elem) } else { TY_INVALID }
+}
+
+fn se_check_atomic(p handle[Parser], t Token, name Bytes, args handle[Ast], count u32) void fails {
+    fetch bool = se_builtin_atomic_fetch(name)
+    sync bool = bytes_starts_with(name, bytes_c(c"__sync_"))
+    minimum u32 = 0
+    generic bool = false
+    if fetch { minimum = if sync { 2 } else { 3 } }
+    else if bytes_eq_c(name, c"__atomic_load_n") { minimum = 2 }
+    else if bytes_eq_c(name, c"__atomic_store_n") || bytes_eq_c(name, c"__atomic_exchange_n") { minimum = 3 }
+    else if bytes_eq_c(name, c"__atomic_compare_exchange_n") { minimum = 6 }
+    else if bytes_eq_c(name, c"__atomic_load") || bytes_eq_c(name, c"__atomic_store") {
+        minimum = 3
+        generic = true
+    } else if bytes_eq_c(name, c"__atomic_exchange") {
+        minimum = 4
+        generic = true
+    } else if bytes_eq_c(name, c"__atomic_compare_exchange") {
+        minimum = 6
+        generic = true
+    } else { return }
+    try se_builtin_count(p, t, count, minimum, if sync { 0xffffffff } else { minimum })
+    elem u32 = se_builtin_atomic_result(args.ty)
+    if !se_complete(elem) || se_vla(elem) || ty_size(elem) == 0 ||
+        (!generic && !ty_is_ptr(elem) && !ty_is_integer(elem)) ||
+        (fetch && ty_is_bool(elem)) {
+        try pa_error(p, args.loc, c"invalid object type for atomic builtin")
+    }
+    if sync { return }
+    arg handle[Ast] = args
+    for i u32 in 1..minimum {
+        arg = arg.next
+        if i + 1 == minimum || (minimum == 6 && i == 4) {
+            if !ty_is_integer(arg.ty) { try pa_error(p, arg.loc, c"atomic memory order requires an integer") }
+        } else if (generic && (i == 1 || (i == 2 && minimum >= 4))) || (minimum == 6 && i == 1) {
+            other u32 = se_builtin_atomic_result(arg.ty)
+            if !se_complete(other) || se_vla(other) || ty_size(elem) != ty_size(other) {
+                try pa_error(p, arg.loc, c"atomic builtin requires a pointer to a matching object")
+            }
+        }
+    }
+}
+
+fn se_atomic_always_lock_free(p handle[Parser], t Token, args handle[Ast], count u32) handle[Ast] fails {
+    try se_builtin_count(p, t, count, 2, 2)
+    size u64 = try se_ice(p, args)
+    pointer handle[Ast] = args.next
+    ptr u32 = se_decay(pointer.ty)
+    if !ty_is_ptr(ptr) && !se_null(pointer) {
+        try pa_error(p, pointer.loc, c"atomic alignment argument requires a pointer")
+    }
+    if size <= 1 { return se_int(p, t.loc, TY_BOOL, 1) }
+    if size != 2 && size != 4 && size != 8 { return se_int(p, t.loc, TY_BOOL, 0) }
+    absolute AddressValue = {}
+    known bool = se_address_value(p, pointer, &absolute) && absolute.symbol == null
+    aligned bool = false
+    if known { aligned = bitcast[u64](absolute.offset) % size == 0 }
+    else if ty_is_ptr(ptr) { aligned = ty_align(ty_node(ptr).elem) >= size }
+    return se_int(p, t.loc, TY_BOOL, if aligned { 1 } else { 0 })
+}
+
+fn se_x86_features(p handle[Parser]) u64 {
+    features u64 = p.x86_features
+    if p.function == null { return features }
+    attr handle[Attr] = p.function.attrs
+    while attr != null {
+        if pa_attr_name(p, attr, c"target") && attr.args_n == 1 {
+            literal Bytes = tok_spelling(p.ctx, attr.args_p[Token])
+            tb Buf = {}
+            defer { buf_free(&tb) }
+            pp_destringize(literal, &tb)
+            features = x86_apply_target(features, buf_bytes(&tb))
+        }
+        attr = attr.next
+    }
+    return features
+}
+
+fn se_check_builtin_call(p handle[Parser], t Token, name Bytes, args handle[Ast], count u32) void fails {
+    binary_ty u32 = se_binary_libm_type(name)
+    if binary_ty != TY_INVALID {
+        try se_builtin_count(p, t, count, 2, 2)
+        try se_conversion(p, binary_ty, args)
+        try se_conversion(p, binary_ty, args.next)
+    }
+    if bytes_starts_with(name, bytes_c(c"__builtin_arm_")) ||
+        bytes_starts_with(name, bytes_c(c"__builtin_aarch64_")) ||
+        bytes_starts_with(name, bytes_c(c"__builtin_mips_")) ||
+        bytes_starts_with(name, bytes_c(c"__builtin_bpf_")) ||
+        bytes_eq_c(name, c"__builtin_btf_type_id") || bytes_eq_c(name, c"__builtin_ttest") {
+        try pa_error(p, t.loc, c"builtin is unavailable on the x86-64 target")
+    }
+    if bytes_starts_with(name, bytes_c(c"__builtin_matrix_")) {
+        try pa_error(p, t.loc, c"matrix builtins require the Clang matrix types extension")
+    }
+    if feature_in(c" __builtin_masked_compress_store __builtin_masked_expand_load __builtin_masked_gather __builtin_masked_load __builtin_masked_scatter __builtin_masked_store ", name) {
+        try pa_error(p, t.loc, c"Clang masked vector builtins are unsupported")
+    }
+    if bytes_eq_c(name, c"__builtin_ia32_addcarry_u32") {
+        try pa_error(p, t.loc, c"unknown builtin; use __builtin_ia32_addcarryx_u32")
+    }
+    if bytes_eq_c(name, c"__builtin_ia32_addcarry_u64") {
+        try pa_error(p, t.loc, c"unknown builtin; use __builtin_ia32_addcarryx_u64")
+    }
+    if bytes_eq_c(name, c"__builtin_tgmath") {
+        try pa_error(p, t.loc, c"GCC __builtin_tgmath is unsupported")
+    }
+    required addr = x86_intrinsic_feature(name)
+    if required != null && !x86_has(se_x86_features(p), bytes_c(required)) {
+        message Buf = {}
+        defer { buf_free(&message) }
+        buf_str(&message, c"intrinsic requires x86 target feature '")
+        buf_str(&message, required)
+        buf_u8(&message, 39)
+        try pa_error(p, t.loc, buf_cstr(&message))
+    }
+    mask128 bool = bytes_eq_c(name, c"__builtin_ia32_pmovmskb128")
+    if bytes_eq_c(name, c"__builtin_ia32_vec_ext_v4si") {
+        try se_builtin_count(p, t, count, 2, 2)
+        ty u32 = ty_unqual(args.ty)
+        if !ty_is_vector(ty) || ty_size(ty) != 16 || ty_node(ty).elem != TY_INT {
+            try pa_error(p, args.loc, c"intrinsic requires a four-lane int vector")
+        }
+        if !ty_is_integer(args.next.ty) { try pa_error(p, args.next.loc, c"vector lane index must be an integer") }
+    }
+    if mask128 || bytes_eq_c(name, c"__builtin_ia32_pmovmskb256") {
+        try se_builtin_count(p, t, count, 1, 1)
+        ty u32 = ty_unqual(args.ty)
+        elem u32 = ty_node(ty).elem
+        if !ty_is_vector(ty) || ty_size(ty) != (if mask128 { 16 } else { 32 }) || !ty_is_integer(elem) || ty_size(elem) != 1 {
+            try pa_error(p, args.loc, c"movemask requires a byte vector of the corresponding width")
+        }
+    }
+    if feature_in(c" __builtin_ia32_pminub128 __builtin_ia32_psubusb128 __builtin_ia32_pavgb128 ", name) {
+        try se_builtin_count(p, t, count, 2, 2)
+        arg handle[Ast] = args
+        while arg != null {
+            ty u32 = ty_unqual(arg.ty)
+            if !ty_is_vector(ty) || ty_size(ty) != 16 || !ty_is_integer(ty_node(ty).elem) ||
+               ty_size(ty_node(ty).elem) != 1 {
+                try pa_error(p, arg.loc, c"intrinsic requires two 16-byte integer vectors")
+            }
+            arg = arg.next
+        }
+    }
+    if bytes_eq_c(name, c"__builtin_ia32_pause") || bytes_eq_c(name, c"__builtin_flt_rounds") {
+        try se_builtin_count(p, t, count, 0, 0)
+    }
+    bit_arity u32 = se_stdc_bit_arity(name)
+    if bit_arity != 0 {
+        try se_check_stdc_bit(p, t, args, count, bit_arity)
+    } else if feature_in(c" __builtin_popcountg __builtin_clzg __builtin_ctzg ", name) {
+        is_popcount bool = bytes_eq_c(name, c"__builtin_popcountg")
+        try se_builtin_count(p, t, count, 1, if is_popcount { 1 } else { 2 })
+        ty u32 = args.ty
+        if !ty_is_integer(ty) || !ty_is_unsigned(ty) {
+            try pa_error(p, args.loc, c"bit count requires an unsigned integer operand")
+        }
+        if count == 2 {
+            fallback handle[Ast] = args.next
+            if !ty_is_integer(fallback.ty) || se_promote_expr(fallback) != TY_INT {
+                try pa_error(p, fallback.loc, c"bit count fallback argument must have type int")
+            }
+        }
+    } else if bytes_starts_with(name, bytes_c(c"__atomic_")) || bytes_starts_with(name, bytes_c(c"__sync_")) {
+        try se_check_atomic(p, t, name, args, count)
+    } else if se_builtin_overflow(name) || se_builtin_checked(name) {
+        try se_check_overflow(p, t, args, count, se_builtin_checked(name))
+    } else if bytes_eq_c(name, c"__builtin_va_start") || bytes_eq_c(name, c"__builtin_c23_va_start") ||
+        bytes_eq_c(name, c"__builtin_ms_va_start") || bytes_eq_c(name, c"__builtin_va_end") ||
+        bytes_eq_c(name, c"__builtin_ms_va_end") || bytes_eq_c(name, c"__builtin_va_copy") ||
+        bytes_eq_c(name, c"__builtin_ms_va_copy") {
+        copy_args bool = bytes_ends_with(name, bytes_c(c"_copy"))
+        start bool = bytes_ends_with(name, bytes_c(c"_start"))
+        ms bool = bytes_starts_with(name, bytes_c(c"__builtin_ms_"))
+        try se_builtin_count(p, t, count, if copy_args || (ms && start) { 2 } else { 1 }, if copy_args || start { 2 } else { 1 })
+        try se_builtin_va_list(p, args)
+        if copy_args { try se_builtin_va_list(p, args.next) }
+        if ms != se_is_ms_va_list(p, args) || (copy_args && ms != se_is_ms_va_list(p, args.next)) {
+            try pa_error(p, args.loc, c"variadic builtin and va_list use different calling conventions")
+        }
+        if start {
+            func handle[Symbol] = p.function
+            if func == null || (ty_node(ty_unqual(func.ty)).flags & TYF_VARIADIC) == 0 {
+                try pa_error(p, t.loc, c"va_start requires a variadic function")
+            }
+            if ms != ((ty_node(ty_unqual(func.ty)).flags & TYF_MS_ABI) != 0) {
+                try pa_error(p, t.loc, c"va_start and the enclosing function use different calling conventions")
+            }
+        }
+    } else if se_builtin_ordered(name) {
+        try se_builtin_count(p, t, count, 2, 2)
+        b handle[Ast] = args.next
+        if !(ty_is_real_float(args.ty) || ty_is_real_float(b.ty)) ||
+            !ty_is_arith(args.ty) || !ty_is_arith(b.ty) || ty_is_complex(args.ty) || ty_is_complex(b.ty) {
+            try pa_error(p, t.loc, c"ordered comparison builtin requires real floating arguments")
+        }
+    } else if se_builtin_predicate(name) {
+        try se_builtin_count(p, t, count, 1, 1)
+        if !ty_is_real_float(args.ty) { try pa_error(p, args.loc, c"expected a real floating argument") }
+    } else if bytes_eq_c(name, c"__builtin_assume_aligned") ||
+        bytes_eq_c(name, c"__builtin_alloca_with_align") || bytes_eq_c(name, c"__builtin_alloca_with_align_and_max") {
+        assume bool = bytes_eq_c(name, c"__builtin_assume_aligned")
+        max u32 = if assume || bytes_ends_with(name, bytes_c(c"_max")) { 3 } else { 2 }
+        try se_builtin_count(p, t, count, if max == 3 && !assume { 3 } else { 2 }, max)
+        if assume {
+            try se_conversion(p, ty_ptr(ty_qual(TY_VOID, Q_CONST | Q_VOLATILE)), args)
+        } else if !ty_is_integer(args.ty) { try pa_error(p, args.loc, c"alloca size must be an integer") }
+        try se_builtin_alignment(p, args.next, !assume)
+    } else if bytes_eq_c(name, c"__builtin_assume_separate_storage") {
+        try se_builtin_count(p, t, count, 2, 2)
+        ptr u32 = ty_ptr(ty_qual(TY_VOID, Q_CONST | Q_VOLATILE))
+        try se_conversion(p, ptr, args)
+        try se_conversion(p, ptr, args.next)
+    } else if bytes_eq_c(name, c"__builtin_set_flt_rounds") || bytes_eq_c(name, c"__builtin_popcount") {
+        try se_builtin_count(p, t, count, 1, 1)
+        try se_conversion(p, TY_INT, args)
+    } else if bytes_eq_c(name, c"__builtin_cpu_supports") || bytes_eq_c(name, c"__builtin_cpu_is") {
+        try se_builtin_count(p, t, count, 1, 1)
+        if args.kind != ND_STRING || ty_node(ty_unqual(args.ty)).elem != TY_CHAR {
+            try pa_error(p, args.loc, c"CPU query requires an ordinary string literal")
+        }
+        if bytes_eq_c(name, c"__builtin_cpu_is") {
+            cursor StringBytes = {}
+            cursor.piece = args.a
+            defer { buf_free(&cursor.encoded) }
+            cpu Buf = {}
+            defer { buf_free(&cpu) }
+            for i u64 in 0..args.value - 1 {
+                byte u8 = try se_next_string_byte(p, &cursor)
+                if byte == 0 { break }
+                buf_u8(&cpu, byte)
+            }
+            if !feature_in(C_X86_CPU_NAMES, buf_bytes(&cpu)) {
+                try pa_error(p, args.loc, c"unknown x86-64 CPU query name")
+            }
+        }
+    } else if bytes_eq_c(name, c"__builtin_call_with_static_chain") {
+        try se_builtin_count(p, t, count, 2, 2)
+        if args.kind != ND_CALL { try pa_error(p, args.loc, c"expected a function call for the static chain builtin") }
+        try se_conversion(p, ty_ptr(TY_VOID), args.next)
+    }
+}

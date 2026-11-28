@@ -5,6 +5,7 @@ Milestone 1: complete GP integer (8/16/32/64-bit), system instructions, and x87.
 """
 
 from collections import defaultdict
+from pathlib import Path
 
 # Operand type constants (must match as/encode.fas)
 OT_NONE = 0
@@ -50,11 +51,18 @@ OT_ZMM = 39
 OT_ZM = 40
 OT_K = 41
 OT_KM = 42
+OT_IND_RM32 = 43
+OT_ABS_MEM = 44
+OT_IND_M = 45
 
 EF2_EVEX = 1 << 0
 EF2_EVEX128 = 0 << 1
 EF2_EVEX256 = 1 << 1
 EF2_EVEX512 = 2 << 1
+EF2_ONLY32 = 1 << 8
+EF2_ONLY64 = 1 << 9
+EF2_MOFFS32 = 1 << 10
+EF2_FAR_IMM = 1 << 11
 def ef2_disp8(shift): return (shift & 0x1f) << 3
 
 # Encoding flags
@@ -160,6 +168,14 @@ for name, ext in ALU_OPS:
         add(m, [OT_RM64, OT_R64], MAP_1, base + 3, 0, EF_REXW | EF_MODRM | EF_OP0_RM | EF_OP1_REG | EF_GOTPCRELX)
 
 # ---------- 2. MOV / MOVABS / MOVSX / MOVZX / MOVSXD / LEA ----------
+for suffix, acc, load, store, prefix in [
+    ('b', OT_AL, 0xa0, 0xa2, 0),
+    ('w', OT_AX, 0xa1, 0xa3, EF_66),
+    ('l', OT_EAX, 0xa1, 0xa3, 0),
+]:
+    for m in ('mov' + suffix, 'mov'):
+        add(m, [OT_ABS_MEM, acc], MAP_1, load, 0, prefix | EF_OP0_RM, EF2_ONLY32 | EF2_MOFFS32)
+        add(m, [acc, OT_ABS_MEM], MAP_1, store, 0, prefix | EF_OP1_RM, EF2_ONLY32 | EF2_MOFFS32)
 for m in ('movb', 'mov'):
     add(m, [OT_IMM8, OT_R8], MAP_1, 0xb0, 0, EF_PLUS_R | EF_OP1_RM | EF_IMM_U8)
     add(m, [OT_IMM8, OT_RM8], MAP_1, 0xc6, 0, EF_MODRM | EF_REG_EXT | EF_OP1_RM | EF_IMM_U8)
@@ -170,7 +186,8 @@ for m in ('movw', 'mov'):
     add(m, [OT_IMM16, OT_RM16], MAP_1, 0xc7, 0, EF_66 | EF_MODRM | EF_REG_EXT | EF_OP1_RM | EF_IMM_16)
     add(m, [OT_R16, OT_RM16], MAP_1, 0x89, 0, EF_66 | EF_MODRM | EF_OP0_REG | EF_OP1_RM)
     add(m, [OT_RM16, OT_R16], MAP_1, 0x8b, 0, EF_66 | EF_MODRM | EF_OP0_RM | EF_OP1_REG)
-    add(m, [OT_SREG, OT_RM16], MAP_1, 0x8c, 0, EF_66 | EF_MODRM | EF_OP0_REG | EF_OP1_RM)
+    add(m, [OT_SREG, OT_R16], MAP_1, 0x8c, 0, EF_66 | EF_MODRM | EF_OP0_REG | EF_OP1_RM)
+    add(m, [OT_SREG, OT_M], MAP_1, 0x8c, 0, EF_MODRM | EF_OP0_REG | EF_OP1_RM)
     add(m, [OT_RM16, OT_SREG], MAP_1, 0x8e, 0, EF_MODRM | EF_OP0_RM | EF_OP1_REG)
 for m in ('movl', 'mov'):
     add(m, [OT_IMM32, OT_R32], MAP_1, 0xb8, 0, EF_PLUS_R | EF_OP1_RM | EF_IMM_32)
@@ -178,6 +195,11 @@ for m in ('movl', 'mov'):
     add(m, [OT_R32, OT_RM32], MAP_1, 0x89, 0, EF_MODRM | EF_OP0_REG | EF_OP1_RM)
     add(m, [OT_RM32, OT_R32], MAP_1, 0x8b, 0, EF_MODRM | EF_OP0_RM | EF_OP1_REG | EF_GOTPCRELX)
     add(m, [OT_SREG, OT_RM32], MAP_1, 0x8c, 0, EF_MODRM | EF_OP0_REG | EF_OP1_RM)
+    add(m, [OT_R32, OT_SREG], MAP_1, 0x8e, 0, EF_MODRM | EF_OP0_RM | EF_OP1_REG)
+    add(m, [OT_CR, OT_R32], MAP_0F, 0x20, 0, EF_MODRM | EF_OP0_REG | EF_OP1_RM, EF2_ONLY32)
+    add(m, [OT_R32, OT_CR], MAP_0F, 0x22, 0, EF_MODRM | EF_OP0_RM | EF_OP1_REG, EF2_ONLY32)
+    add(m, [OT_DR, OT_R32], MAP_0F, 0x21, 0, EF_MODRM | EF_OP0_REG | EF_OP1_RM, EF2_ONLY32)
+    add(m, [OT_R32, OT_DR], MAP_0F, 0x23, 0, EF_MODRM | EF_OP0_RM | EF_OP1_REG, EF2_ONLY32)
 for m in ('movq', 'mov'):
     # Note: llvm-mc uses C7 /0 for movq $imm32s, %r64 (and 48 B8 for movabsq $imm64, %r64 or when imm doesn't fit in i32!)
     add(m, [OT_IMM32S, OT_RM64], MAP_1, 0xc7, 0, EF_REXW | EF_MODRM | EF_REG_EXT | EF_OP1_RM | EF_IMM_32S)
@@ -260,6 +282,9 @@ for name, ext in [('not', 2), ('neg', 3), ('mul', 4), ('imul', 5), ('div', 6), (
         add(m, [OT_RM64], MAP_1, 0xf7, ext, EF_REXW | EF_MODRM | EF_REG_EXT | EF_OP0_RM)
 
 for name, ext in [('inc', 0), ('dec', 1)]:
+    for suffix, reg, prefix in [('w', OT_R16, EF_66), ('l', OT_R32, 0)]:
+        for m in (name + suffix, name):
+            add(m, [reg], MAP_1, 0x40 + 8 * ext, 0, prefix | EF_PLUS_R | EF_OP0_RM, EF2_ONLY32)
     for m in (name + 'b', name):
         add(m, [OT_RM8], MAP_1, 0xfe, ext, EF_MODRM | EF_REG_EXT | EF_OP0_RM)
     for m in (name + 'w', name):
@@ -333,16 +358,24 @@ for name, op_imm, op_cl in [('shld', 0xa4, 0xa5), ('shrd', 0xac, 0xad)]:
 
 # ---------- 6. Push / Pop ----------
 for m in ('pushq', 'push'):
-    add(m, [OT_R64], MAP_1, 0x50, 0, EF_PLUS_R | EF_OP0_RM)
-    add(m, [OT_RM64], MAP_1, 0xff, 6, EF_MODRM | EF_REG_EXT | EF_OP0_RM)
-    add(m, [OT_IMM8S], MAP_1, 0x6a, 0, EF_IMM_S8)
-    add(m, [OT_IMM32S], MAP_1, 0x68, 0, EF_IMM_32S)
+    add(m, [OT_R64], MAP_1, 0x50, 0, EF_PLUS_R | EF_OP0_RM, EF2_ONLY64)
+    add(m, [OT_RM64], MAP_1, 0xff, 6, EF_MODRM | EF_REG_EXT | EF_OP0_RM, EF2_ONLY64)
+    add(m, [OT_IMM8S], MAP_1, 0x6a, 0, EF_IMM_S8, EF2_ONLY64)
+    add(m, [OT_IMM32S], MAP_1, 0x68, 0, EF_IMM_32S, EF2_ONLY64)
+for m in ('pushl', 'push'):
+    add(m, [OT_R32], MAP_1, 0x50, 0, EF_PLUS_R | EF_OP0_RM, EF2_ONLY32)
+    add(m, [OT_RM32], MAP_1, 0xff, 6, EF_MODRM | EF_REG_EXT | EF_OP0_RM, EF2_ONLY32)
+    add(m, [OT_IMM8S], MAP_1, 0x6a, 0, EF_IMM_S8, EF2_ONLY32)
+    add(m, [OT_IMM32], MAP_1, 0x68, 0, EF_IMM_32, EF2_ONLY32)
 for m in ('pushw', 'push'):
     add(m, [OT_R16], MAP_1, 0x50, 0, EF_66 | EF_PLUS_R | EF_OP0_RM)
     add(m, [OT_RM16], MAP_1, 0xff, 6, EF_66 | EF_MODRM | EF_REG_EXT | EF_OP0_RM)
 for m in ('popq', 'pop'):
-    add(m, [OT_R64], MAP_1, 0x58, 0, EF_PLUS_R | EF_OP0_RM)
-    add(m, [OT_RM64], MAP_1, 0x8f, 0, EF_MODRM | EF_REG_EXT | EF_OP0_RM)
+    add(m, [OT_R64], MAP_1, 0x58, 0, EF_PLUS_R | EF_OP0_RM, EF2_ONLY64)
+    add(m, [OT_RM64], MAP_1, 0x8f, 0, EF_MODRM | EF_REG_EXT | EF_OP0_RM, EF2_ONLY64)
+for m in ('popl', 'pop'):
+    add(m, [OT_R32], MAP_1, 0x58, 0, EF_PLUS_R | EF_OP0_RM, EF2_ONLY32)
+    add(m, [OT_RM32], MAP_1, 0x8f, 0, EF_MODRM | EF_REG_EXT | EF_OP0_RM, EF2_ONLY32)
 for m in ('popw', 'pop'):
     add(m, [OT_R16], MAP_1, 0x58, 0, EF_66 | EF_PLUS_R | EF_OP0_RM)
     add(m, [OT_RM16], MAP_1, 0x8f, 0, EF_66 | EF_MODRM | EF_REG_EXT | EF_OP0_RM)
@@ -419,16 +452,30 @@ for cc, nib in CC_MAP.items():
     add('j' + cc, [OT_RELAX], MAP_1, 0x70 + nib, 0x80 + nib, EF_IS_JCC)
 
 for m in ('jmp', 'jmpq'):
-    add(m, [OT_RELAX], MAP_1, 0xeb, 0xe9, 0)
-    add(m, [OT_IND_RM64], MAP_1, 0xff, 4, EF_MODRM | EF_REG_EXT | EF_OP0_RM | EF_GOTPCRELX)
+    add(m, [OT_RELAX], MAP_1, 0xeb, 0xe9, 0, EF2_ONLY64 if m == 'jmpq' else 0)
+    add(m, [OT_IND_RM64], MAP_1, 0xff, 4, EF_MODRM | EF_REG_EXT | EF_OP0_RM | EF_GOTPCRELX, EF2_ONLY64)
+for m in ('jmp', 'jmpl'):
+    add(m, [OT_IND_RM32], MAP_1, 0xff, 4, EF_MODRM | EF_REG_EXT | EF_OP0_RM, EF2_ONLY32)
+
+for m, prefix, width, kind in [('ljmp', 0, OT_IMM32, EF_IMM_32),
+                                ('ljmpl', 0, OT_IMM32, EF_IMM_32),
+                                ('ljmpw', EF_66, OT_IMM16, EF_IMM_16)]:
+    add(m, [OT_IMM16, width], MAP_1, 0xea, 0, prefix | kind, EF2_ONLY32 | EF2_FAR_IMM)
+    add(m, [OT_IND_M], MAP_1, 0xff, 5, prefix | EF_MODRM | EF_REG_EXT | EF_OP0_RM)
+add('ljmpq', [OT_IND_M], MAP_1, 0xff, 5, EF_REXW | EF_MODRM | EF_REG_EXT | EF_OP0_RM)
 
 for m in ('call', 'callq'):
-    add(m, [OT_REL32], MAP_1, 0xe8, 0, 0)
-    add(m, [OT_IND_RM64], MAP_1, 0xff, 2, EF_MODRM | EF_REG_EXT | EF_OP0_RM | EF_GOTPCRELX)
+    add(m, [OT_REL32], MAP_1, 0xe8, 0, 0, EF2_ONLY64 if m == 'callq' else 0)
+    add(m, [OT_IND_RM64], MAP_1, 0xff, 2, EF_MODRM | EF_REG_EXT | EF_OP0_RM | EF_GOTPCRELX, EF2_ONLY64)
+for m in ('call', 'calll'):
+    add(m, [OT_IND_RM32], MAP_1, 0xff, 2, EF_MODRM | EF_REG_EXT | EF_OP0_RM, EF2_ONLY32)
 
-for m in ('ret', 'retq'):
-    add(m, [], MAP_1, 0xc3, 0, 0)
-    add(m, [OT_IMM16], MAP_1, 0xc2, 0, EF_IMM_16)
+for m, mode in [('ret', 0), ('retq', EF2_ONLY64), ('retl', EF2_ONLY32)]:
+    add(m, [], MAP_1, 0xc3, 0, 0, mode)
+    add(m, [OT_IMM16], MAP_1, 0xc2, 0, EF_IMM_16, mode)
+for m, prefix in [('lret', 0), ('lretl', 0), ('lretw', EF_66), ('lretq', EF_REXW)]:
+    add(m, [], MAP_1, 0xcb, 0, prefix)
+    add(m, [OT_IMM16], MAP_1, 0xca, 0, prefix | EF_IMM_16)
 
 add('loop', [OT_REL8], MAP_1, 0xe2, 0, 0)
 add('loope', [OT_REL8], MAP_1, 0xe1, 0, 0)
@@ -462,7 +509,10 @@ ZERO_OP_1 = [
     ('wait', 0x9b, 0), ('fwait', 0x9b, 0),
 ]
 for m, op, fl in ZERO_OP_1:
-    add(m, [], MAP_1, op, 0, fl)
+    mode = EF2_ONLY64 if m in ('leaveq', 'pushfq', 'popfq') else 0
+    add(m, [], MAP_1, op, 0, fl, mode)
+for m, op in [('pushfl', 0x9c), ('popfl', 0x9d)]:
+    add(m, [], MAP_1, op, 0, 0, EF2_ONLY32)
 
 # Multi-byte nop forms (nopl/nopw/nopq r/m)
 for m in ('nopw', 'nop'):
@@ -526,7 +576,17 @@ for m, op, fl, acc in [
     add(m, [OT_M, acc], MAP_1, op, 0, fl)
     add(m, [OT_M], MAP_1, op, 0, fl)
 
+for m, reg, prefix in [('movntil', OT_R32, 0), ('movntiq', OT_R64, EF_REXW)]:
+    for mnemonic in (m, 'movnti'):
+        add(mnemonic, [reg, OT_M], MAP_0F, 0xc3, 0, prefix | EF_MODRM | EF_OP0_REG | EF_OP1_RM)
+
 # Memory-operand system instructions
+for m, ext in [('sgdt', 0), ('sidt', 1), ('lgdt', 2), ('lidt', 3)]:
+    for suffix, mode in [('', 0), ('l', EF2_ONLY32), ('q', EF2_ONLY64)]:
+        add(m + suffix, [OT_M], MAP_0F, 0x01, ext, EF_MODRM | EF_REG_EXT | EF_OP0_RM, mode)
+for m, ext in [('sldt', 0), ('str', 1), ('lldt', 2), ('ltr', 3), ('verr', 4), ('verw', 5)]:
+    for suffix in ('', 'w'):
+        add(m + suffix, [OT_RM16], MAP_0F, 0x00, ext, EF_MODRM | EF_REG_EXT | EF_OP0_RM)
 add('clflush', [OT_M], MAP_0F, 0xae, 7, EF_MODRM | EF_REG_EXT | EF_OP0_RM)
 add('clflushopt', [OT_M], MAP_0F, 0xae, 7, EF_66 | EF_MODRM | EF_REG_EXT | EF_OP0_RM)
 add('prefetchnta', [OT_M], MAP_0F, 0x18, 0, EF_MODRM | EF_REG_EXT | EF_OP0_RM)
@@ -1306,7 +1366,7 @@ for cnt, op4, omap, opcode, ext, flags, ef2 in flat_descs:
 lines.append("}")
 lines.append("")
 
-out_path = "/home/glonex/fas-experimental-backend/ld-ergo/as/table.fas"
+out_path = Path(__file__).with_name("table.fas")
 with open(out_path, "w") as f:
     f.write("\n".join(lines))
 

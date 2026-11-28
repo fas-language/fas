@@ -83,6 +83,45 @@ future_hidden: .quad 0
         for consumer in self.tools():
             run(self.link('partial-overridden', self.simple, merged, override, linker=consumer), expected=43)
 
+    def test_same_named_sections_merge_with_shifted_relocations(self):
+        # Same name/type/entsize and flags apart from W/X -> one output
+        # section with the union of the flags, as in GNU ld and lld -r
+        # (objtool finds vmlinux.o sections by name). Section-symbol
+        # relocations get the input section's base added; executable gaps are
+        # int3; group members stay separate.
+        def source(n, v):
+            return (f'.text\n.p2align 4\n.globl f{n}\nf{n}: lea .Lv{n}(%rip),%rax\n'
+                    f' mov (%rax),%eax\n call .Lpad{n}\n nop\n ret\n.Lpad{n}: ret\n'
+                    f'.data\n.p2align 3\n.byte {n}\n.Lv{n}: .long {v}\n'
+                    f'.section .table,"a"\n.quad .Lv{n}\n'
+                    f'.section .text.g,"axG",@progbits,g,comdat\n.globl g\ng: ret\n'
+                    # the kernel mixes "a" assembly and "aw" C sections of one name
+                    + ('.section .mixed,"a"\n.quad 1\n' if n == 1 else '.section .mixed,"aw"\n.quad 2\n'))
+        one = self.assemble('merge-one', source(1, 20))
+        two = self.assemble('merge-two', source(2, 22))
+        main = self.assemble('merge-main', '.text\n.globl answer\nanswer: call f1\n'
+                             ' mov %eax,%ecx\n call f2\n add %ecx,%eax\n ret\n')
+        for producer in self.tools():
+            with self.subTest(producer=producer):
+                out = self.partial('merge', one, two, main, tool=producer,
+                                   flags=('-z', 'noexecstack'))
+                data = out.read_bytes()
+                sections = core.elf_sections(data)
+                named = lambda name: [s for s in sections if s['name'] == name]
+                for name in ('.text', '.rela.text', '.data', '.table', '.rela.table', '.mixed'):
+                    self.assertEqual(len(named(name)), 1, name)
+                self.assertEqual(named('.mixed')[0]['flags'] & 3, 3)
+                self.assertEqual(len(named('.text.g')), 1)  # COMDAT keeps one
+                text = named('.text')[0]
+                self.assertEqual(text['align'], 16)
+                if producer == core.LINKER:
+                    body = data[text['offset']:text['offset'] + text['size']]
+                    self.assertEqual(body[16:32].rstrip(b'\xcc')[-1:], b'\xc3')
+                    self.assertEqual(body[17:32], b'\xcc' * 15)
+                for consumer in self.tools():
+                    final = self.link('merge-final', self.simple, out, linker=consumer)
+                    run(final, expected=42)
+
     def test_comdat_groups_relocations_and_final_gc(self):
         def candidate(name, value):
             return self.assemble(name, '.section .text.answer,"axG",@progbits,sig,comdat\n'

@@ -2,7 +2,7 @@
 
 Fir is the IR that front ends emit and backends consume. Fas lowers to it directly (`src/fas/lower_emit.ml`). A C front end, or any other language, can write it directly as text and compile it with `fas-fir`.
 
-**Version: Fir 0.3** (2026-11-16: `memory(...)` and `willreturn` on declarations, `switch` weights; 0.2: the `fenv` attribute). The version numbers the contract in this file, not the tools. An addition (a new instruction, flag or attribute, or a rule that makes more programs valid) raises the minor number. A change to what existing Fir means raises the major number, and every front end and backend is updated with it. The contract is frozen at Fir 1.0. Syntax marked *designed* is fixed here but not yet accepted by the parser; §15 lists it.
+**Version: Fir 0.4** (2026-11-25: the `nocf_check` attribute and `patchable(N, M)`; 0.3: `memory(...)` and `willreturn` on declarations, `switch` weights; 0.2: the `fenv` attribute). The version numbers the contract in this file, not the tools. An addition (a new instruction, flag or attribute, or a rule that makes more programs valid) raises the minor number. A change to what existing Fir means raises the major number, and every front end and backend is updated with it. The contract is frozen at Fir 1.0. Syntax marked *designed* is fixed here but not yet accepted by the parser; §15 lists it.
 
 This file defines the IR and its text format. It is checked against the real printer (`fir_print.ml`), parser (`fir_parse.ml`) and verifier (`fir_verify.ml`). §12 says what the native x86-64 backend compiles today. The programs in `test/fas_fir/` are working examples, run by `test/fas_fir.sh`.
 
@@ -32,7 +32,7 @@ Contents:
 - **Block parameters instead of phis.** A block lists typed parameters, and each edge into the block passes arguments for them. The entry block's parameters are the function's parameters.
 - **No aggregate values.** Structs and arrays exist only in memory: `alloca`, globals, `ptradd`, `load`, `store`. The front end computes layouts (sizes, alignments and field offsets). Calls are the one place aggregates appear, as ABI descriptions (§5).
 - **Integers have no signedness.** Each operation decides how to read the bits: `sdiv`/`udiv`, `slt`/`ult`, and so on.
-- **Target-neutral in form, 64-bit little-endian in fact.** Only the triple names the target, and the current backend only supports `x86_64-unknown-linux-gnu`. Every front end in this project assumes a 64-bit little-endian target with 8-byte pointers, and that will not change. On a target whose division does not trap, a backend adds the check and the `trap` itself (§6).
+- **Little-endian x86 targets.** `x86_64-unknown-linux-gnu` uses 8-byte pointers. For native relocatable output, `i386-unknown-linux-gnu` and `i386-unknown-linux-code16` use 4-byte pointers. Front ends choose the triple and lay out objects for their target. On a target whose division does not trap, a backend adds the check and the `trap` itself (§6).
 - **One function at a time.** No backend step needs another function's body to compile a function correctly; summaries of other functions (which registers a call clobbers, say) may be used when they are available. The output never depends on the order in which functions are compiled or on thread scheduling.
 - **No unwinding, ever.** Fir has no exceptions, `invoke` or landing pads. A call either returns, or never comes back to its frame (`noreturn`, `exit`, `longjmp`). Errors are ordinary values.
 - **Any control flow graph.** Critical edges and irreducible loops are legal, and there is no loop metadata.
@@ -90,6 +90,7 @@ A module is, in order:
 ```
 triple "x86_64-unknown-linux-gnu"          required, first
 strict_aliasing false                      optional (default: true)
+discardable @SYMBOL                       optional permission to omit an unreferenced local definition
 module_asm "TEXT"                          optional top-level asm (GNU asm("...") outside functions), any number
 loc 1 "file.c" 12 5 [!scope S]             optional location table: id, file, line, column, lexical scope
 scope 1 parent 0                           optional lexical scopes (debug info): id, enclosing scope (0 = the function)
@@ -97,8 +98,14 @@ dtype 1 base "int" signed 4                optional debug types: id, description
 alias_tag 1 "int" 0                        optional TBAA tags: id, name, parent id (0 = root)
 global ...                                 globals
 alias ...                                  symbol aliases
+ifunc ...                                  GNU indirect functions (STT_GNU_IFUNC)
 func ... / declare ...                     functions
 ```
+
+`discardable` allows native C lowering to omit a local function or global
+when no live definition refers to it. It never changes a public definition's
+linkage. Front ends omit this marker for definitions with explicit retention
+attributes. Native lowering accounts for names present in assembly templates.
 
 `module_asm` entries are assembled together, in order, as one GNU assembler source (AT&T syntax, starting in `.text`). The text may define functions and data in any section and refer to any symbol of the module; Fir reaches what it defines through `declare` and `extern` globals. A symbol only asm text refers to must not be `local` (LLVM deletes it). Section groups (COMDAT) are rejected.
 
@@ -112,6 +119,7 @@ global @name size N align A LINKAGE [VISIBILITY] [section "s"] [readonly] [threa
 LINKAGE    ::= local | global | weak
 VISIBILITY ::= hidden | protected             (default visibility is not written)
 INIT       ::= zero                            N zero bytes (.bss)
+             | common                          ELF common storage (global, no section/readonly/TLS)
              | extern                          defined elsewhere; size/align describe it
              | { PIECE, PIECE, ... }           the pieces must add up to exactly N bytes
 PIECE      ::= bytes "..."                     raw bytes; escapes \"  \\  \xx (two hex digits)
@@ -119,6 +127,7 @@ PIECE      ::= bytes "..."                     raw bytes; escapes \"  \\  \xx (t
              | reloc @sym[+-addend] w8         8-byte absolute address of sym+addend
              | reloc @sym[+-addend] pcrel w4   4-byte sym+addend minus the address of these bytes
              | blockaddr(@f, N)                8 bytes: the constant ptr blockaddr(@f, N) (§3)
+             | blockdiff(@f, A, B, W)          W bytes: blockaddr(@f, A) minus blockaddr(@f, B)
 ```
 
 Examples:
@@ -158,10 +167,26 @@ alias @hook         weak hidden = @default_hook
 
 - **Verifier rules:** the target is a function or global *defined* in this module, not an alias (so there are no cycles); a function alias has no addend; an addend stays inside the global; the alias name is defined nowhere else.
 
+### Indirect functions (IFUNC)
+
+```
+ifunc @name LINKAGE [VISIBILITY] = @resolver
+```
+
+A GNU indirect function (`STT_GNU_IFUNC`), as C's `__attribute__((ifunc("resolver")))`. The dynamic loader (or CRT startup for static links) runs `@resolver` once and binds calls and address references to `@name` to the function pointer `@resolver` returns. Linkage and visibility belong to `@name` (defaulting to `global` and `default`); `@resolver` keeps its own symbol.
+
+```
+ifunc @magic global = @resolver
+ifunc @magic_local local = @resolver
+ifunc @magic_hidden global hidden = @resolver
+```
+
+- **Verifier rules:** `@name` is defined nowhere else in the module; `@resolver` is a function *defined* in this module; `@resolver` is non-variadic, returns a single `ptr`, and takes `()`, `(i64)`, or `(i64, ptr)`.
+
 ### Functions
 
 ```
-func @name (ABI, ...) -> (ABI, ...) LINKAGE [VISIBILITY] [ATTRS] [display "src name"] {
+func @name (ABI, ...) -> (ABI, ...) LINKAGE [VISIBILITY] [ATTRS] [section "name"] [patchable(N, M)] [display "src name"] {
   var "x" T [scope S] [arg K] [!loc L] [at %slot]      optional source variables (debug info), before the blocks
 ^entry(%a: T, ...):
   ...instructions...
@@ -172,7 +197,7 @@ func @name (ABI, ...) -> (ABI, ...) LINKAGE [VISIBILITY] [ATTRS] [display "src n
 
 declare @name (ABI, ...) -> (ABI, ...) LINKAGE [ATTRS] [PROMISES]   a function defined elsewhere
 
-ATTRS ::= any of: inline noinline cold noreturn fenv secret
+ATTRS ::= any of: inline noinline cold noreturn fenv secret nocf_check
 PROMISES ::= [memory(none) | memory(read) | memory(argmem)] [willreturn]   (declarations only)
 ```
 
@@ -184,8 +209,11 @@ PROMISES ::= [memory(none) | memory(read) | memory(argmem)] [willreturn]   (decl
 - **Dominance:** a value can be used only where its definition dominates the use. A block argument is a use at the end of the predecessor block.
 - **`local` functions may be reshaped.** When a `local` function's address is never taken (it is only the callee of direct calls), a backend may change its signature, clone it or fold it into its callers. Its symbol is then not promised to exist with the written signature. `global` and `weak` functions keep theirs.
 - **`fenv`** marks a function that sees the dynamic float environment (§6, C's `FENV_ACCESS`). It is never inlined into a function with a different marking, nor the reverse.
+- **`section "name"`** places the definition in the named executable section. The default ELF section is `.text`.
+- **`nocf_check`** (C `__attribute__((nocf_check))`, the kernel's `__noendbr`): under indirect-branch tracking (`fas-fir -fcf-protection=branch`) the function gets no `endbr64` at its entry, so an indirect call to it faults. Without that option it changes nothing.
+- **`patchable(N, M)`** (C `patchable_function_entry(N, M)`, 0 ≤ M ≤ N ≤ 65535, definitions only) puts N single-byte nops at the function's entry: M of them before the entry symbol, the other N − M after it (after the `endbr64`, if there is one). The address of the first nop is recorded in the `__patchable_function_entries` section, for code that patches entries at run time. `patchable(0, 0)` gives none, overriding `fas-fir -fpatchable-function-entry=N,M` for this function. The LLVM path passes it on as `"patchable-function-entry"` and `"patchable-function-prefix"`.
 - **Promises on a declaration** let a call to a function defined elsewhere be less than a full barrier. `memory(none)`: the call reads and writes no memory the caller can see. `memory(read)`: it may read any memory and writes none. `memory(argmem)`: it reads and writes only memory addressed through its pointer arguments, at any offset from them. At most one `memory(...)`. `willreturn`: every call returns to its caller. Breaking a promise is undefined behaviour (§8). They are refused on a `func`, whose body says what it does. A backend may ignore them (the native backend does today); the LLVM path passes them on as `memory(none)`, `memory(read)`, `memory(argmem: readwrite)` and `willreturn`.
-- **`blockaddr` pins blocks.** A function whose blocks appear in a `blockaddr` keeps its blocks as written: no pass merges, splits, renumbers or deletes them. A backend may simply skip such functions in its optimizations.
+- **`blockaddr` and `blockdiff` pin blocks.** A function whose blocks appear in either keeps its blocks as written: no pass merges, splits, renumbers or deletes them. A backend may simply skip such functions in its optimizations. A `blockdiff` data piece stores the signed byte difference, truncated to 1, 2, 4 or 8 bytes, with no load-time relocation.
 
 ### Debug information
 
@@ -197,21 +225,25 @@ Source variables and their types are module metadata that only `-g` reads. Nothi
   |---|---|
   | `base "NAME" ENC SIZE` | A scalar of `SIZE` bytes. `ENC` is `signed`, `unsigned`, `boolean`, `float`, `signed_char` or `unsigned_char`. |
   | `pointer T` | A pointer to type `T` (`pointer 0` is `void *`). |
-  | `struct "NAME" size N {"F" T OFF, ...}` | A struct of `N` bytes; each member has a name, a type and a byte offset. `union` instead of `struct` for a union. |
+  | `struct "NAME" size N {"F" T OFF, ...}` | A struct of `N` bytes; each member has a name, a type and a byte offset. A bitfield uses a bit offset followed by `bits WIDTH`. `union` instead of `struct` for a union. |
   | `struct "NAME" declared` | A struct (or `union`) whose layout is not known here. |
-  | `array T count N` | `N` elements of `T`. |
+  | `array T count N` | `N` elements of `T`; `-1` denotes an unspecified bound. |
   | `vector T count N` | A SIMD vector of `N` elements of `T`. |
   | `typedef "NAME" T` | Another name for `T`. |
+  | `subroutine R {T, ...} [variadic]` | Function returning type `R` with the listed parameter types. |
   | `enum "NAME" BASE {"A" 0, ...}` | An enumeration with underlying type `BASE`. |
 
 - **`scope N parent P`** declares a lexical block. Ids are consecutive from 1 and `P` is smaller than `N` (0 is the function itself). A `loc` names its innermost scope with `!scope S`; the code at that location belongs to that block. All the locations and variables that name a scope, or a scope inside it, must belong to one function. A scope with no code is dropped and its variables move to the enclosing one.
-- **`var "x" T`**, at the top of a function body, declares a source variable of type `T`. `scope S` puts it in a lexical block (default: the function), `arg K` marks it as the K-th parameter (1-based), `!loc L` is where it is declared. `at %slot` says where it lives: `%slot` is a `ptr` (normally an `alloca`) to its storage for the whole function, so a debugger finds the variable through it wherever the backend keeps the slot (in memory or, when promoted, in a register). A variable without `at` is tracked by `dbg_value N, V` instead (N is its 1-based position among the function's `var` lines); a variable that has neither shows as optimized out. A `dbg_value` holds from that point along every path until the next `dbg_value` of the same variable. Where paths with different values meet, the variable is unknown (shown as optimized out) unless a `dbg_value` names the joining block's parameter. Passes that rewrite functions keep each variable and its home.
+- **`var "x" T`**, at the top of a function body, declares a source variable of type `T`. `scope S` puts it in a lexical block (default: the function), `arg K` marks it as the K-th parameter (1-based), `!loc L` is where it is declared. `at %slot` says where it lives: `%slot` is a `ptr` (normally an `alloca`) to its storage for the whole function, so a debugger finds the variable through it wherever the backend keeps the slot (in memory or, when promoted, in a register). An optional `stack` after `at %slot` keeps that home in memory for inspection even after its last machine use. A variable without `at` is tracked by `dbg_value N, V` instead (N is its 1-based position among the function's `var` lines); a variable that has neither shows as optimized out. A `dbg_value` holds from that point along every path until the next `dbg_value` of the same variable. Where paths with different values meet, the variable is unknown (shown as optimized out) unless a `dbg_value` names the joining block's parameter. Passes that rewrite functions keep each variable and its home.
 - **No name in the debug information may contain a NUL byte** (`\00`): not a `loc` file name, a `dtype` name, member or enumerator, a `var` name, or a function's `display` name. DWARF ends these strings with a NUL, so the verifier refuses them.
+
+Use `at %slot stack indirect` when a frame slot holds the object's address, as for a variable-length array. A static local uses `at @symbol [tls]` in its `var` line. A file-scope object uses `dglobal "x" T L @symbol [tls]` at module scope, where `L` is the declaration location id. The optional `tls` marker makes the debugger resolve the address in the selected thread.
 
 ## 5. Signatures and the ABI
 
 ```
-SIG ::= (ABI, ABI, ... [, ...]) -> (ABI, ...)       a trailing "..." makes it variadic
+SIG ::= [ms_abi [xmm_result]] (ABI, ABI, ... [, ...]) -> (ABI, ...)
+                                                    a trailing "..." makes it variadic
 ABI ::= T                        scalar or vector, passed as C passes it
       | zext T | sext T          a narrow integer that the ABI widens (C char/short/_Bool)
       | agg(SIZE, ALIGN, [FIELD, FIELD, ...])
@@ -247,6 +279,7 @@ How the native backend classifies an `agg` (x86-64 SysV, the same as clang for t
 - **`f80` (C `long double`):** a scalar `f80` argument goes on the stack (16 bytes, 16-aligned) and a result comes back in x87 `st0`. An `agg` holding an `f80` field is MEMORY class as an argument; as a result, `agg(16, 16, [0: f80])` comes back in `st0`, any other in memory (sret). A bare C `_Complex long double` is the `complex f80` ABI: memory as an argument, `st0` (real) and `st1` (imaginary) as a result. `agg(32, 16, [0: complex f80])` is a struct holding one, and `agg(32, 16, [0: f80, 16: f80])` a struct of two `long double`s: both are MEMORY both ways like any agg over 16 bytes (gcc and clang agree).
 - **`ALIGN` above 16** (C `_Alignas(32)`, a 32-byte vector): such an agg is over 16 bytes and so MEMORY; on the stack it is placed at a multiple of its alignment, and the caller aligns `rsp` to it for the call.
 - **Vectors** in a signature or through `...` are passed as C passes a GNU vector (`vector_size`) of the same size, i.e. as an `agg` holding just that vector. The C size is the vector's bytes (bool vectors: bit packed) rounded up to a power of 2 (C's 3 x float is 16 bytes), and it is also the alignment. Up to 4 bytes: INTEGER, in a GPR. 8 bytes: SSE, in an XMM register (except `<1 x f64>`, which gcc and clang pass in memory). 16 bytes: SSE + SSEUP, all of one XMM register. Wider: MEMORY (the psABI without AVX). This matches gcc; clang agrees except that, without AVX, it returns `<1 x f64>` in `xmm0` and vectors of 32 or 64 bytes in `xmm0`..`xmm3`, where gcc and Fir use memory (sret). C code that returns such vectors to Fir must come from gcc or be compiled with AVX. `va_arg` of a vector type reads it the same way.
+- **Microsoft x64 on Linux:** `ms_abi` selects that convention on a definition, declaration or call, including indirect calls. It uses four argument positions and 32 bytes of caller-allocated home slots. Records of 1, 2, 4 or 8 bytes pass in integer locations. Other records pass via copies through pointers, consuming the first argument position for a hidden result pointer when returning a large record. Vectors wider than 16 bytes use that same indirect convention, matching GCC for bare GNU vectors. Only one result is allowed. `va_start` in an MS function writes an eight-byte cursor to the first unnamed argument slot. Frontends can advance it and fetch the value using loads and stores. `xmm_result` is the native legalizer's spelling for a 16-byte aggregate result carried in XMM0, such as a lowered `i128` or vector.
 - **A struct through `...`:** a variadic argument has no ABI in the signature, so the call names it: `call (i32, ...) -> (i64) @f(i32 1, agg(16, 8, [0: i64, 8: f64]) %p)`; a bare complex number is written `complex T %p`. The operand is a `ptr` to the bytes, as for any `agg` argument, and it is classified by the rules here. Without the `agg(...)` prefix a `ptr` is passed as a pointer. The prefix is only allowed on variadic arguments (not the fixed ones, whose ABI the signature gives) and only on a `ptr` operand. The callee reads it with `va_arg agg(...)` (§6).
 
 **Integers that are not 1, 8, 16, 32 or 64 bits wide** in a signature (the native backend, x86-64 SysV):
@@ -404,9 +437,14 @@ Alignment is a power of two. It is a promise about the address: an access whose 
 | `va_start P` | Only in a variadic function. Fills the `va_list` at `P` so that it reads this function's unnamed arguments, starting after the fixed ones. |
 | `%x = va_arg T P` | Reads the next unnamed argument through the `va_list` at `P` and advances it. `T` is an integer, `ptr`, `f16` (an SSE slot, like `f32`), `f32`, `f64`, `f80` (C `long double`, from the overflow area, 16-aligned) or a vector (read as the `agg` that holds it, §5). Up to 64 bits it reads one 8-byte argument word and keeps its low `T` bits; a wider integer is read as the call passed it (§5: `i65`..`i128` as `__int128`, wider as MEMORY class). |
 | `%p = va_arg agg(SIZE, ALIGN, [FIELDS]) P`, `%p = va_arg complex T P` | Reads the next unnamed argument as a struct (or a bare complex number) by value (SysV va_arg for aggregates: from the register save area when all its eightbytes still fit there, otherwise whole from the overflow area; MEMORY class always from the overflow area). `%p` is a `ptr` to a copy owned by this instruction: it stays valid until the function returns or the same instruction runs again (a loop overwrites it), so copy it out if you need it longer. The fields follow the §5 `agg` rules. |
-| `%a, %b = asm [volatile] [intel] "TMPL" out(OUTS) in(INS) [clobber("C", ...)]` | GNU extended inline asm, as C's `asm`. Each operand is `[[NAME]] "CONSTRAINT" TYPE [VALUE]`. Outputs are numbered first, then inputs, as in GCC. An output takes a value when it is memory (`=m`: the value is its address, a `ptr`) or read-write (`+r`: the old value). Every output that is not memory-only is a result, in order: write `%r =` for one, `%a, %b =` for several, nothing for none. Inputs always take a value. A bare constant has the operand's type (`ptr` for a memory operand). Constraints are GCC's x86-64 ones: `r q Q R a b c d S D A x v Y… m o V g X p i n s e Z I J K L M N O`, `{reg}`, `0`..`9` and `[NAME]` ties, `=&` early clobber, `=@ccCOND` flag outputs (an integer, 0 or 1), and `,`-separated alternatives (the first one that fits is used). x87, MMX and AVX-512 mask register operands are rejected. Clobbers are register names, `"memory"` and `"cc"`. `TMPL` uses `%N`, `%[NAME]`, the modifiers `b h w k q c n p P z V x t g H a`, `%=` (a number unique to the statement), `%%`, and `{att\|intel}` dialect groups. `intel` marks a template in Intel syntax. `volatile` keeps a statement whose results are unused; a statement without outputs is always kept. Empty `out()`/`in()` may be left out. The verifier checks the constraints, the template's operand references, and the operand and result types. A function or global that only asm text refers to must not be `local` (LLVM deletes it, as C needs `used`). |
+| `%a, %b = asm [volatile] [intel] "TMPL" out(OUTS) in(INS) [clobber("C", ...)]` | GNU extended inline asm, as C's `asm`. Each operand is `[[NAME]] "CONSTRAINT" TYPE [VALUE]`. Outputs are numbered first, then inputs, as in GCC. An output takes a value when it is memory (`=m`: the value is its address, a `ptr`) or read-write (`+r`: the old value). Every output that is not memory-only is a result, in order: write `%r =` for one, `%a, %b =` for several, nothing for none. Inputs always take a value. A bare constant has the operand's type (`ptr` for a memory operand). Constraints are GCC's x86-64 ones: `r q Q R a b c d S D A x v Y… t u m o V g X p i n s e Z I J K L M N O`, `{reg}`, `0`..`9` and `[NAME]` ties, `=&` early clobber, `=@ccCOND` flag outputs (an integer, 0 or 1), and `,`-separated alternatives (the first one that fits is used). `t` (`st(0)`) and `u` (`st(1)`) place `f80`/`f64`/`f32` operands on the x87 stack following GCC's x87 rules (including `"st"`/`"st(N)"` clobbers for popped inputs). MMX and AVX-512 mask register operands are rejected. Clobbers are register names, `"st"`/`"st(N)"`, `"memory"` and `"cc"`. `TMPL` uses `%N`, `%[NAME]`, the modifiers `b h w k q c n p P z V x t g H a`, `%=` (a number unique to the statement), `%%`, and `{att\|intel}` dialect groups. `intel` marks a template in Intel syntax. `volatile` keeps a statement whose results are unused; a statement without outputs is always kept. Empty `out()`/`in()` may be left out. The verifier checks the constraints, the template's operand references, and the operand and result types. A function or global that only asm text refers to must not be `local` (LLVM deletes it, as C needs `used`). |
 | `trap` | Abort (ud2). Usually followed by `unreachable`. |
 | `dbg_value VAR, V` | Debug info: the function's VAR-th `var` (1-based, one without `at`) holds V from here on (§4, "Debug information"). It has no effect on semantics. |
+
+In native x86-64 code, a fixed `{rsp}` operand names the current stack
+pointer. Its input value is ignored. An output reads the stack pointer
+after the asm. The template must leave the stack pointer unchanged
+when it returns to compiler-generated code.
 
 Call ATTRS are any of `noreturn returns_twice nounwind tail`.
 
@@ -429,7 +467,7 @@ Every block ends with exactly one terminator.
 | `br C, ^t(ARGS), ^f(ARGS)[, weight W]` | Conditional branch on an `i1`. W is the probability of the true edge, out of 1000. |
 | `switch V, ^default(ARGS), [K: ^b(ARGS), ...][, weights [Wd, W1, ...]]` | Multi-way branch on an integer value. Keys are written without a type and must be distinct. The optional weights give one non-negative integer per edge, default first, then the cases in order, read relative to their sum. With `br ..., weight W` and the `cold` attribute, this is all the profile information Fir carries; like them, the weights are hints that change no behaviour (a pass that rewrites the switch may drop them). |
 | `indirect_br P, [^b1, ^b2, ...]` | Computed goto. The list holds every possible target, and those blocks take no parameters. `P` must be a `blockaddr` of this function for one of the listed blocks, possibly after arithmetic that lands back on one (`&&a + (&&b - &&a)`); anything else is undefined, and the current backends trap. |
-| `asm_goto [volatile] [intel] "TMPL" in(INS) [clobber("C", ...)] ^fall [^l1, ^l2, ...]` | GNU `asm goto`: an `asm` (§6) without outputs that may jump to one of the listed blocks, or else continues at `^fall`. The template names the list's labels after the operands, as in GCC: label K (from 0) is `%lN` with N = number of inputs + K, always with the `l` modifier; `%lN` of an operand is an error. `^fall` and the labels take no parameters, and a block may appear more than once. |
+| `[%r0, ... = ] asm_goto [volatile] [intel] "TMPL" [out(OUTS)] [in(INS)] [clobber("C", ...)] ^fall [^l1, ^l2, ...]` | GNU `asm goto` (with optional C23/GCC 11+ outputs): an `asm` (§6) that may jump to one of the listed blocks or else continues at `^fall`. Outputs follow the same `out(...)` rules as `asm` and are defined on both `^fall` and every indirect label edge `^l1, ...` (C23 / Clang 16+ semantics). The template names the list's labels after all operands, as in GCC: label K (from 0) is `%lN` with N = number of outputs + number of inputs + K, always with the `l` modifier; `%lN` of an operand is an error. `^fall` and the labels take no parameters, and a block may appear more than once. |
 | `ret` / `ret V` / `ret V1, V2` | Return. The values must match the result list. |
 | `unreachable` | Control never gets here. |
 
@@ -672,6 +710,10 @@ Not supported: `_Float128`, `_Float32x`/`_Float64x` beyond `f80`, and the decima
 
 ## 12. Native backend support status
 
+The i386 backend emits ELF32 relocatable objects for integer and pointer code. It supports the i386 SysV stack calling convention and `regparm` for up to three words in EAX, EDX, and ECX. Variadic functions use the stack convention with a pointer to the next argument as `va_list`. The `code16` target uses the real-mode encoding of the same calling convention, including 32-bit return addresses. Global data relocations use 4-byte absolute fields. Floating-point operations and floating-point, vector, or aggregate parameters and results currently require x86-64.
+
+### x86-64
+
 The generated code uses only baseline x86-64 instructions (SSE2 and x87; no SSE3, SSSE3, SSE4, POPCNT, LZCNT, BMI, FMA or AVX), so it runs on any x86-64 CPU.
 
 **Everything in §2–§7 parses and verifies, but the native backend compiles only a subset.** `fas-fir` reports the rest as `not supported by the native backend yet: ...` or `native backend: ...`. Each gap below has a workaround that needs only supported features.
@@ -693,7 +735,7 @@ The generated code uses only baseline x86-64 instructions (SSE2 and x87; no SSE3
 | Globals | Every linkage and visibility, `readonly`, `extern` (also weak: address 0 when undefined), `bytes`/`zeros`/`reloc ... w8`/`reloc ... pcrel w4` (R_X86_64_PC32, resolved at link time, so a `readonly` table of them stays read-only even in position-independent code); `section "s"` (globals in one section are laid out in order; the linker's `__start_s`/`__stop_s` bound it); `thread_local`, defined or `extern`, in .tdata/.tbss or a named section (a NOBITS one when it is called `.tbss.*` and holds only zeros), and aliases of one (initial-exec TLS in `-c` objects and hosted links, the same in native PIE executables, local-exec in `-no-pie` ones; general-dynamic, through `__tls_get_addr`, in objects for shared libraries, `fas-fir -c -fPIC`, which `dlopen` can load whatever their TLS size; a native executable's `_start` sets up the TLS block when there is a PT_TLS segment) | — | — |
 | Symbols | `weak` and `hidden`/`protected` on functions and globals, defined or not; `alias` of functions and globals (with an addend) | — | — |
 | Startup | `@main` () or (i32, ptr) → i32; static position-independent executable (the default: `_start` applies the R_X86_64_RELATIVE relocations itself, so there is no TEXTREL and no dynamic loader) or fixed-address static executable (`fas -Wl,-no-pie`, `fas-fir --no-pie`); `-c` objects; libc and its startup with `fas-fir --hosted` (static, `-static-pie` or `-static`, `test/fas_fir/hosted/`) | Shared libraries; libc without `--hosted` (an undefined symbol then says to use it) | Use syscalls, or `--hosted`. |
-| Inline asm | `asm` (§6) with every constraint, modifier and clobber listed there. Operands are placed in registers, immediates, frame slots or RIP-relative globals. The templates of a module are rendered once allocation is done and assembled in one run of an external GNU assembler (`$FAS_AS`, else `as --64`, else `$FAS_CC -c -x assembler`), and the machine code is spliced into `.text` with its relocations (calls to and addresses of any symbol, local labels, `%=`). AT&T and Intel syntax. `asm_goto` too: `%lN` is the label block's symbol, and the block is placed as a jump target (`test/fas_fir/c/asm.fir`, `test/fas_fir/asm_link.fir`, `test/fas_fir/asm_goto.fir`). `module_asm` (§4): assembled in one run of the same assembler; every allocated section of the result (code, data, .bss, TLS, notes, init/fini arrays, .eh_frame from CFI directives) becomes a section of the object with its symbols, bindings, visibilities and relocations (`test/fas_fir/module_asm.fir`) | `module_asm` with section groups (COMDAT), absolute or common symbols; a statement that puts bytes in another section, defines a global symbol, aligns above 16, or refers to a label in another statement | Separate `.s` file. |
+| Inline asm | `asm` (§6) with every constraint, modifier and clobber listed there. Operands are placed in registers, immediates, frame slots or RIP-relative globals. The templates of a module are rendered once allocation is done and assembled in one run of an external GNU assembler (`$FAS_AS`, else `as --64`, else `$FAS_CC -c -x assembler`), and the machine code is spliced into `.text` with its relocations (calls to and addresses of any symbol, local labels, `%=`). Additional PROGBITS and NOBITS sections and their relocations are kept in the output. AT&T and Intel syntax. `asm_goto` too: `%lN` is the label block's symbol, and the block is placed as a jump target (`test/fas_fir/c/asm.fir`, `test/fas_fir/asm_link.fir`, `test/fas_fir/asm_goto.fir`). `module_asm` (§4): assembled in one run of the same assembler; every allocated section of the result (code, data, .bss, TLS, notes, init/fini arrays, .eh_frame from CFI directives) becomes a section of the object with its symbols, bindings, visibilities and relocations (`test/fas_fir/module_asm.fir`) | `module_asm` with section groups (COMDAT), absolute or common symbols; a statement that defines a global symbol, uses section groups or unsupported section types or flags, or refers directly to a label in another statement | Separate `.s` file. |
 | Unwind info | `.eh_frame` for every function and `_start`, so debuggers and the libgcc unwinder walk through Fir frames (`test/fas_fir/c/unwind.fir`) | — | — |
 | Debug info | `-g` (`fas -g`, `fas-fir -g`): DWARF 5 line tables from the `loc` table and `!loc` (every file and line, with columns), and one subprogram per function with its source name, linkage name, declaration line and address range, so debuggers set breakpoints at file:line and backtraces show functions and lines; source variables (`var ... at %slot`) with their types and lexical blocks, in frame slots, registers (location lists) or behind a pointer, so debuggers print them (`test/native_debug.sh`, `test/fas_fir/vars.fir`). `-g` never changes the code | Variables tracked by `dbg_value` (shown as optimized out); inlined-call records | — |
 

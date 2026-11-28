@@ -209,3 +209,7 @@ let multi_results (abis : abi list) =
       abis
   in
   (parts, if !mem then Some ((!off + !al - 1) / !al * !al, !al) else None)
+
+(* Win64 passes records of these sizes as one integer. Other records
+   travel by address, including a hidden result pointer when returned. *)
+let ms_reg_size = function 1 | 2 | 4 | 8 -> true | _ -> false

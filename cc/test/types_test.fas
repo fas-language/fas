@@ -11,6 +11,10 @@ use "../../lib/core.fas"
 use "../../lib/os.fas"
 use "../../lib/buf.fas"
 use "../../lib/bytes.fas"
+use "../../lib/table.fas"
+use "../token.fas"
+use "../sym.fas"
+use "../kw.fas"
 use "../types.fas"
 use "../layout.fas"
 use "../abi.fas"
@@ -59,6 +63,9 @@ fn test_interning_and_quals() void {
     f1 u32 = ty_func(TY_VOID, &ps[0], 2, false)
     f2 u32 = ty_func(TY_VOID, &ps[0], 2, false)
     assert(f1 == f2)
+    ms u32 = ty_func_ms_abi(f1)
+    assert(ms == ty_func_ms_abi(f2))
+    assert(!ty_compatible(f1, ms))
 
     // _BitInt, _Complex, vector interning
     assert(ty_bitint(17, false) == ty_bitint(17, false))
@@ -258,7 +265,9 @@ fn test_abi_rules() void {
 
 fn main() i32 {
     ctx TypeCtx = {}
-    tc_init(&ctx)
+    syms SymTable = {}
+    sym_init(&syms)
+    tc_init(&ctx, &syms)
     defer { tc_free(&ctx) }
 
     test_interning_and_quals()

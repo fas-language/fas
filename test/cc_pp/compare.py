@@ -10,9 +10,13 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tools/refcache"))
+from refcache import run as cached_run
+
 TESTS = Path(__file__).resolve().parent
 ORACLE = os.environ.get("CLANG", "clang-22")
 ENV = {**os.environ, "LC_ALL": "C", "SOURCE_DATE_EPOCH": "0"}
@@ -88,10 +92,16 @@ def run(command, source=None):
     )
 
 
-def test_case(fcc, case, normalized, shared_headers):
+def preprocess(command, case, *, deps=(), scratch=None):
+    inputs = (*deps, case.path) if case.path != "-" else deps
+    return cached_run(command, ns="cc-pp", deps=inputs, scratch=scratch,
+                      c=True, input=case.source, cwd=ROOT, env=ENV, timeout=45)
+
+
+def test_case(fcc, case, normalized, shared_headers, defs):
     args = ["-std=gnu23", "-E", "-P", *case.args, case.path]
     try:
-        expected = run([ORACLE, *args], case.source)
+        expected = preprocess([ORACLE, *args], case)
         if expected.returncode:
             return case, "clang-skip", expected.stderr.decode(errors="replace")[:1000]
         reference = tokens(expected.stdout)
@@ -108,14 +118,14 @@ def test_case(fcc, case, normalized, shared_headers):
             detail = f"token {i}: fcc {observed[i:i+8]!r}, clang {reference[i:i+8]!r}"
             status = "diff"
         if normalized and actual.returncode == 0 and case.category != "regression":
-            baseline = run([ORACLE, *normalized, *args], case.source)
+            baseline = preprocess([ORACLE, *normalized, *args], case, deps=[defs], scratch=defs.parent)
             if baseline.returncode == 0 and observed == tokens(baseline.stdout):
                 return case, "normalized-same", detail
-            baseline = run([ORACLE, *normalized, *shared_headers, *args], case.source)
+            baseline = preprocess([ORACLE, *normalized, *shared_headers, *args], case, deps=[defs], scratch=defs.parent)
             if baseline.returncode == 0 and observed == tokens(baseline.stdout):
                 return case, "shared-headers-same", detail
         if case.category == "manifest" and status == "diff":
-            gcc = run(["gcc", *args], case.source)
+            gcc = preprocess(["gcc", *args], case)
             if gcc.returncode == 0 and reference != tokens(gcc.stdout):
                 detail += " (GCC also differs from Clang)"
         return case, status, detail
@@ -162,6 +172,15 @@ def extra_checks(fcc):
         got = run([fcc, "-E", "-P", "-"], source)
         if got.returncode != 1 or diagnostic not in got.stderr:
             raise SystemExit(f"diagnostic regression for {source!r}: {got.returncode}, {got.stderr!r}")
+    cli_errors = [
+        (("-E", "-std=gnu26", "-"), b"unsupported C standard"),
+        (("-E", "-", "extra.c"), b"expected one input file, got extra.c"),
+        (("-fsyntax-only", "-", "extra.c"), b"expected one input file, got extra.c"),
+    ]
+    for args, diagnostic in cli_errors:
+        got = run([fcc, *args], b"int x;\n")
+        if got.returncode != 1 or diagnostic not in got.stderr:
+            raise SystemExit(f"CLI diagnostic regression for {args!r}: {got.returncode}, {got.stderr!r}")
     nfc = run([fcc, "-E", "-P", "-std=c23", "-"], "int e\u0301;\n".encode())
     if nfc.returncode != 1 or b"identifier is not in Unicode NFC" not in nfc.stderr:
         raise SystemExit("strict identifier normalization regression")
@@ -202,7 +221,7 @@ def extra_checks(fcc):
         dump = run([fcc, "-E", "-dM", "-std=c23", str(main)])
         if dump.returncode or b"#define __fcc__ 1\n" not in dump.stdout or b"#define linux " in dump.stdout:
             raise SystemExit("strict macro dump regression")
-    print(f"directed CLI and diagnostics: {len(cases) + 7} passed", flush=True)
+    print(f"directed CLI and diagnostics: {len(cases) + len(cli_errors) + 7} passed", flush=True)
 
 
 def normalized_features():
@@ -228,6 +247,18 @@ def normalized_features():
     return ("\n".join(out) + "\n").encode()
 
 
+def read_expected(path):
+    entries = {}
+    for number, line in enumerate(path.read_text().splitlines(), 1):
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        status, case, reason = line.split(maxsplit=2)
+        if status not in {"diff", "fcc-error", "clang-skip", "timeout"} or case in entries:
+            raise ValueError(f"{path}:{number}: invalid or duplicate expectation")
+        entries[case] = (status, reason)
+    return entries
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("fcc")
@@ -237,7 +268,10 @@ def main():
     ap.add_argument("--filter", default="", help="regular expression on case names")
     ap.add_argument("--limit", type=int)
     ap.add_argument("--json", type=Path, help="record case statuses and first mismatches")
+    ap.add_argument("--expected", type=Path, default=Path(__file__).with_name("expected_diffs.txt"))
     opt = ap.parse_args()
+    expected = read_expected(opt.expected)
+    unexpected = 0
     suites = opt.suite or ["regression", "manifest", "headers", "projects"]
     if "regression" in suites:
         extra_checks(opt.fcc)
@@ -268,13 +302,24 @@ def main():
         if gcc_include and Path(gcc_include).is_dir() and not gcc_include.endswith("/include-fixed"):
             shared_headers.extend(["-isystem", gcc_include])
         with ThreadPoolExecutor(max_workers=opt.jobs) as pool:
-            work = pool.map(lambda c: test_case(opt.fcc, c, normalized, shared_headers), cases)
+            work = pool.map(lambda c: test_case(opt.fcc, c, normalized, shared_headers, defs), cases)
             for number, (case, status, detail) in enumerate(work, 1):
                 counter = counts[case.category]
                 counter[status] += 1
-                records.append(dict(category=case.category, name=case.name, status=status, detail=detail))
+                key = f"{case.category}/{case.name}"
+                expectation = expected.get(key)
+                reason = expectation[1] if expectation and expectation[0] == status else None
+                failed = status in {"diff", "fcc-error", "timeout"} or (
+                    status == "clang-skip" and case.category in {"regression", "manifest"}
+                )
+                unexpected += failed and reason is None
+                record = dict(category=case.category, name=case.name, status=status, detail=detail)
+                if reason:
+                    record["expected_reason"] = reason
+                records.append(record)
                 if status not in {"same", "normalized-same", "shared-headers-same", "clang-skip"} and counter[status] <= 8:
-                    print(f"{case.category}/{case.name}: {status}: {detail}", flush=True)
+                    suffix = f" (expected: {reason})" if reason else ""
+                    print(f"{key}: {status}{suffix}: {detail}", flush=True)
                 if number % 1000 == 0:
                     print(f"compared {number}/{len(cases)} inputs", flush=True)
     columns = "same normalized-same shared-headers-same diff fcc-error clang-skip timeout".split()
@@ -284,9 +329,8 @@ def main():
         print(f"| {category} | " + " | ".join(str(count[s]) for s in columns) + " |")
     if opt.json:
         opt.json.write_text(json.dumps({"counts": counts, "cases": records}, indent=2) + "\n")
-    return any(c["diff"] or c["fcc-error"] or c["timeout"] or
-               (category in {"regression", "manifest"} and c["clang-skip"])
-               for category, c in counts.items())
+    print(f"Unexpected differences: {unexpected}")
+    return bool(unexpected)
 
 
 if __name__ == "__main__":

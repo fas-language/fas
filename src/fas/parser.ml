@@ -733,13 +733,37 @@ module P = struct
           (Printf.sprintf "C header path `%s` needs quotes or angle brackets" name)
     | _ -> Error [ Diag.error use_span "expected a quoted or angle-bracket C header" ]
 
-  and items p =
+  (* Every `use` that names another file (a Fas file, a C header, an
+     assembly file, a pkg) comes first in a file, before any other item:
+     only comments, blank lines and inline blocks may precede or sit
+     between them. A driver can then find a file's imports by reading its
+     head, without parsing the rest. [body] is true once another item has
+     been read. *)
+  and items p = items_after p false
+
+  and items_after p body =
     skip_newlines p;
     if at p Token.Eof then Ok []
     else
+      let start = span p in
       let* xs = item p in
-      let* ys = items p in
-      Ok (xs @ ys)
+      (* An inline `<<TAG` block (`use "asm"`, `use "C" as c`) holds code
+         rather than naming another file, so it may sit next to the
+         declarations it belongs with. *)
+      let is_use = function
+        | Ast.Use { c_header = Some (Ast.C_fragment _); _ } -> false
+        | Ast.Use _ | Ast.Pkg _ -> true
+        | _ -> false
+      in
+      if body && List.exists is_use xs then
+        error start
+          "`use` lines go at the top of the file, before any other item; move \
+           this one up"
+      else
+        let is_item = function Ast.Use _ | Ast.Pkg _ -> false | _ -> true in
+        let body = body || List.exists is_item xs in
+        let* ys = items_after p body in
+        Ok (xs @ ys)
 
   and item p =
     match (peek p).kind with

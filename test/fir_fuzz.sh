@@ -9,8 +9,10 @@
 # Not part of `dune runtest`: it needs clang and takes a while. Usage:
 #   FIR_FUZZ=_build/default/test/fir_fuzz.exe sh test/fir_fuzz.sh
 set -eu
+ulimit -f 524288
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+export FAS_TEST_REFCACHE="$ROOT/tools/refcache/compiler.py"
 FIR_FUZZ=${FIR_FUZZ:-$ROOT/_build/default/test/fir_fuzz.exe}
 CC=${CC:-clang-22}
 export CC
@@ -23,7 +25,7 @@ status=0
 for f in "$ROOT"/test/fir_fuzz/*.fir; do
   if ! "$FIR_FUZZ" -keep "$KEEP" -file "$f" >/dev/null 2>&1; then
     echo "fir fuzz: regression $(basename "$f") failed"
-    "$FIR_FUZZ" -keep "$KEEP" -file "$f" -v 2>&1 | tail -5
+    "$FIR_FUZZ" -keep "$KEEP" -file "$f" -v || :
     status=1
   fi
 done

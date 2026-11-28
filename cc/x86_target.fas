@@ -1,0 +1,260 @@
+// Command-line target features are independent of predefined macro overrides.
+// Target attributes start from the TU features and modify only their function.
+struct X86Flag { name addr, enable u64, disable u64, required u64 }
+struct X86Cpu { name addr, features u64, defines addr }
+
+fn x86_flag(name Bytes) u32 {
+    for i usize in 0..X86_FLAG_COUNT {
+        if bytes_eq_c(name, X86_FLAGS[i].name) { return trunc[u32](i + 1) }
+    }
+    return 0
+}
+
+fn x86_flag_apply(features u64, id u32, enable bool) u64 {
+    f handle[X86Flag] = &X86_FLAGS[zext[usize](id - 1)]
+    if enable { return features | f.enable }
+    return features & ~f.disable
+}
+
+fn x86_cpu(name Bytes) u32 {
+    for i usize in 1..X86_CPU_COUNT {
+        if bytes_eq_c(name, X86_CPUS[i].name) { return trunc[u32](i) }
+    }
+    return 0
+}
+
+fn x86_intrinsic_feature(name Bytes) addr {
+    if feature_in(c" __builtin_ia32_pmovmskb128 __builtin_ia32_pminub128 __builtin_ia32_psubusb128 __builtin_ia32_pavgb128 __builtin_ia32_vec_ext_v4si ", name) {
+        return c"sse2"
+    }
+    if bytes_eq_c(name, c"__builtin_ia32_pmovmskb256") { return c"avx2" }
+    if bytes_eq_c(name, c"__builtin_ia32_emms") || bytes_eq_c(name, c"__builtin_ia32_paddq") ||
+       bytes_eq_c(name, c"__builtin_ia32_psubq") { return c"mmx" }
+    return null
+}
+
+fn x86_has(features u64, name Bytes) bool {
+    id u32 = x86_flag(name)
+    if id == 0 { return false }
+    // Most switches also affect prerequisite features. Test the macro of the
+    // requested feature itself so e.g. -mno-popcnt does not disable SSE4.2.
+    f handle[X86Flag] = &X86_FLAGS[zext[usize](id - 1)]
+    return (features & f.required) != 0
+}
+
+fn x86_apply_target(features u64, args Bytes) u64 {
+    while args.n > 0 {
+        end usize = bytes_index(args, 44) catch args.n
+        word Bytes = pa_trim(bytes_sub(args, 0, end))
+        if bytes_starts_with(word, bytes_c(c"arch=")) {
+            cpu u32 = x86_cpu(bytes_from(word, 5))
+            if cpu != 0 { features = X86_CPUS[zext[usize](cpu)].features }
+        } else {
+            disable bool = bytes_starts_with(word, bytes_c(c"no-"))
+            id u32 = x86_flag(if disable { bytes_from(word, 3) } else { word })
+            if id != 0 { features = x86_flag_apply(features, id, !disable) }
+        }
+        if end == args.n { break }
+        args = bytes_from(args, end + 1)
+    }
+    return features
+}
+
+// Keep CPUID behind the SysV ABI so rbx is preserved and all four results
+// can be read without depending on the compiler's current ISA selection.
+use "asm" <<S
+    .text
+    .globl fcc_cpuid
+    .type fcc_cpuid,@function
+fcc_cpuid:
+    pushq %rbx
+    movq %rdx,%r8
+    movl %edi,%eax
+    movl %esi,%ecx
+    cpuid
+    movl %eax,0(%r8)
+    movl %ebx,4(%r8)
+    movl %ecx,8(%r8)
+    movl %edx,12(%r8)
+    popq %rbx
+    ret
+    .size fcc_cpuid,.-fcc_cpuid
+    .globl fcc_xcr0
+    .type fcc_xcr0,@function
+fcc_xcr0:
+    xorl %ecx,%ecx
+    xgetbv
+    ret
+    .size fcc_xcr0,.-fcc_xcr0
+    .section .note.GNU-stack,"",@progbits
+S
+
+extern "C" {
+    fn fcc_cpuid(leaf u32, subleaf u32, out addr) void
+    fn fcc_xcr0() u32
+}
+
+// Names affect the CPU identity macros only. In particular a VM may report
+// a model name while withholding instructions usually present on that model.
+fn x86_host_name(vendor u32, family u32, model u32, avx512 bool) addr {
+    if vendor == 0x68747541 { // AuthenticAMD
+        if family == 23 {
+            if model >= 0x30 && (model <= 0x3f || (model >= 0x60 && model <= 0x7f) ||
+                                 (model >= 0x84 && model <= 0x87) || model >= 0x90) { return c"znver2" }
+            return c"znver1"
+        }
+        if family == 25 {
+            if (model >= 0x10 && model <= 0x1f) || (model >= 0x60 && model <= 0x7f) || model >= 0xa0 {
+                return c"znver4"
+            }
+            return c"znver3"
+        }
+        if family == 26 { return c"znver5" }
+    }
+    if vendor == 0x756e6547 && family == 6 { // GenuineIntel
+        switch model {
+            case 0x1a, 0x1e, 0x1f, 0x2e: return c"nehalem"
+            case 0x25, 0x2c, 0x2f: return c"westmere"
+            case 0x2a, 0x2d: return c"sandybridge"
+            case 0x3a, 0x3e: return c"ivybridge"
+            case 0x3c, 0x3f, 0x45, 0x46: return c"haswell"
+            case 0x3d, 0x47, 0x4f, 0x56: return c"broadwell"
+            case 0x4e, 0x5e, 0x8e, 0x9e, 0xa5, 0xa6: return c"skylake"
+            case 0x55: return if avx512 { c"skylake-avx512" } else { c"skylake" }
+            case 0x66: return c"cannonlake"
+            case 0x7d, 0x7e: return c"icelake-client"
+            case 0x6a, 0x6c: return c"icelake-server"
+            case 0x8c, 0x8d: return c"tigerlake"
+            case 0x97, 0x9a, 0xb7, 0xba, 0xbf: return c"alderlake"
+            case 0x8f: return c"sapphirerapids"
+            case 0xcf: return c"emeraldrapids"
+            case 0xaa, 0xac: return c"meteorlake"
+        }
+    }
+    return c"x86-64"
+}
+
+struct X86HostBit {
+    feature addr
+    word u32
+    bit u32
+    xcr0 u32
+}
+
+// Words are the CPUID registers collected in x86_detect_host order. xcr0
+// requirements cover AVX state (XMM/YMM) and AVX-512 state (including masks).
+const X86_HOST_BITS arr[57, X86HostBit] = {
+    { c"mmx", 0, 23, 0 },
+    { c"fxsr", 0, 24, 0 },
+    { c"sse", 0, 25, 0 },
+    { c"sse2", 0, 26, 0 },
+    { c"sse3", 1, 0, 0 },
+    { c"pclmul", 1, 1, 0 },
+    { c"ssse3", 1, 9, 0 },
+    { c"fma", 1, 12, 6 },
+    { c"cx16", 1, 13, 0 },
+    { c"sse4.1", 1, 19, 0 },
+    { c"sse4.2", 1, 20, 0 },
+    { c"crc32", 1, 20, 0 },
+    { c"movbe", 1, 22, 0 },
+    { c"popcnt", 1, 23, 0 },
+    { c"aes", 1, 25, 0 },
+    { c"xsave", 1, 26, 2 },
+    { c"avx", 1, 28, 6 },
+    { c"f16c", 1, 29, 6 },
+    { c"rdrnd", 1, 30, 0 },
+    { c"fsgsbase", 2, 0, 0 },
+    { c"bmi", 2, 3, 0 },
+    { c"avx2", 2, 5, 6 },
+    { c"bmi2", 2, 8, 0 },
+    { c"rtm", 2, 11, 0 },
+    { c"avx512f", 2, 16, 230 },
+    { c"avx512dq", 2, 17, 230 },
+    { c"rdseed", 2, 18, 0 },
+    { c"adx", 2, 19, 0 },
+    { c"avx512ifma", 2, 21, 230 },
+    { c"clflushopt", 2, 23, 0 },
+    { c"clwb", 2, 24, 0 },
+    { c"avx512cd", 2, 28, 230 },
+    { c"sha", 2, 29, 0 },
+    { c"avx512bw", 2, 30, 230 },
+    { c"avx512vl", 2, 31, 230 },
+    { c"avx512vbmi", 3, 1, 230 },
+    { c"avx512vbmi2", 3, 6, 230 },
+    { c"gfni", 3, 8, 0 },
+    { c"vaes", 3, 9, 6 },
+    { c"vpclmulqdq", 3, 10, 6 },
+    { c"avx512vnni", 3, 11, 230 },
+    { c"avx512bitalg", 3, 12, 230 },
+    { c"avx512vpopcntdq", 3, 14, 230 },
+    { c"avx512fp16", 4, 23, 230 },
+    { c"sha512", 5, 0, 6 },
+    { c"avxvnni", 5, 4, 6 },
+    { c"avx512bf16", 5, 5, 230 },
+    { c"xsaveopt", 6, 0, 2 },
+    { c"xsavec", 6, 1, 2 },
+    { c"xsaves", 6, 3, 2 },
+    { c"lzcnt", 7, 5, 0 },
+    { c"sse4a", 7, 6, 0 },
+    { c"xop", 7, 11, 6 },
+    { c"fma4", 7, 16, 6 },
+    { c"tbm", 7, 21, 0 },
+    { c"mwaitx", 7, 29, 0 },
+    { c"clzero", 8, 0, 0 },
+}
+
+fn x86_detect_host(features addr) u32 {
+    regs arr[4, u32] = {}
+    p addr = &regs[0]
+    fcc_cpuid(0, 0, p)
+    max_leaf u32 = regs[0]
+    vendor u32 = regs[1]
+    words arr[9, u32] = {}
+    fcc_cpuid(1, 0, p)
+    signature u32 = regs[0]
+    words[0] = regs[3]
+    words[1] = regs[2]
+    xcr0 u32 = if (words[1] & (1 << 27)) != 0 { fcc_xcr0() } else { 0 }
+    if max_leaf >= 7 {
+        fcc_cpuid(7, 0, p)
+        words[2] = regs[1]
+        words[3] = regs[2]
+        words[4] = regs[3]
+        if regs[0] >= 1 {
+            fcc_cpuid(7, 1, p)
+            words[5] = regs[0]
+        }
+    }
+    if max_leaf >= 13 && (words[1] & (1 << 26)) != 0 {
+        fcc_cpuid(13, 1, p)
+        words[6] = regs[0]
+    }
+    fcc_cpuid(0x80000000, 0, p)
+    ext_leaf u32 = regs[0]
+    if ext_leaf >= 0x80000001 {
+        fcc_cpuid(0x80000001, 0, p)
+        words[7] = regs[2]
+    }
+    if ext_leaf >= 0x80000008 {
+        fcc_cpuid(0x80000008, 0, p)
+        words[8] = regs[1]
+    }
+    own u64 = 0
+    for i usize in 0..X86_FLAG_COUNT { own |= X86_FLAGS[i].required }
+    enabled u64 = 0
+    for i usize in 0..57 {
+        f handle[X86HostBit] = &X86_HOST_BITS[i]
+        if (words[zext[usize](f.word)] & (1 << f.bit)) != 0 && (xcr0 & f.xcr0) == f.xcr0 {
+            id u32 = x86_flag(bytes_c(f.feature))
+            flag handle[X86Flag] = &X86_FLAGS[zext[usize](id - 1)]
+            enabled |= flag.required | (flag.enable & ~own)
+        }
+    }
+    features[u64] = enabled
+
+    family u32 = (signature >> 8) & 15
+    model u32 = (signature >> 4) & 15
+    if family == 6 || family == 15 { model |= (signature >> 12) & 0xf0 }
+    if family == 15 { family += (signature >> 20) & 255 }
+    return x86_cpu(bytes_c(x86_host_name(vendor, family, model, x86_has(enabled, bytes_c(c"avx512f")))))
+}

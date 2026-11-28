@@ -13,8 +13,10 @@
 # Usage:
 #   ABI_FUZZ=_build/default/test/abi_fuzz.exe sh test/abi_fuzz.sh
 set -eu
+ulimit -f 524288
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+export FAS_TEST_REFCACHE="$ROOT/tools/refcache/compiler.py"
 ABI_FUZZ=${ABI_FUZZ:-$ROOT/_build/default/test/abi_fuzz.exe}
 CC=${ABI_FUZZ_CC:-gcc}
 LLVM_CC=${FAS_CC:-clang-22}

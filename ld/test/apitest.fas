@@ -39,6 +39,8 @@ use "../copy.fas"
 use "../dynamic.fas"
 use "../zlib.fas"
 use "../script.fas"
+use "../lscript.fas"
+use "../limage.fas"
 use "../map.fas"
 use "../stats.fas"
 use "../partial.fas"
@@ -89,6 +91,7 @@ struct ConcurrentCtx {
     lib_b Bytes
     shared_b Bytes
     ver_b Bytes
+    inner_threads u32
     failed arr[4, u32]
 }
 
@@ -98,7 +101,7 @@ fn concurrent_link_job(arg addr, b usize, e usize, worker u32) void {
         vfs LdVfs = {}
         vfs.in_memory = true
         vfs.quiet = true
-        vfs.threads = 2
+        vfs.threads = cc.inner_threads
         vfs_add(&vfs, bytes_c(c"__vfs__/start.o"), cc.start_b)
         vfs_add(&vfs, bytes_c(c"__vfs__/main.o"), cc.main_b)
         vfs_add(&vfs, bytes_c(c"__vfs__/lib/libfoo.a"), cc.lib_b)
@@ -145,7 +148,7 @@ fn concurrent_link_job(arg addr, b usize, e usize, worker u32) void {
             vfs_s LdVfs = {}
             vfs_s.in_memory = true
             vfs_s.quiet = true
-            vfs_s.threads = 2
+            vfs_s.threads = cc.inner_threads
             sess LdSession = {}
             ld_session_begin(&sess, &vfs_s)
             ld_add_input(&sess, bytes_c(c"__vfs__/start.o"), cc.start_b)
@@ -280,7 +283,12 @@ fn main(argc i32, argv addr) i32 {
     vfs3 LdVfs = {}
     vfs3.in_memory = true
     vfs3.quiet = true
-    vfs3.threads = 2
+    limit u32 = 8
+    configured addr = os_getenv(c"FAS_LD_TEST_MAX_THREADS")
+    if configured != null { limit = trunc[u32](bytes_to_u64(bytes_c(configured)) catch 8) }
+    inner_threads u32 = if limit >= 8 { 2 } else { 1 }
+    outer_threads u32 = if limit >= 4 { 4 } else { limit }
+    vfs3.threads = inner_threads
     vfs_add(&vfs3, bytes_c(c"__vfs__/start.o"), start_b)
     vfs_add(&vfs3, bytes_c(c"__vfs__/main.o"), main_b)
     vfs_add(&vfs3, bytes_c(c"__vfs__/lib/libfoo.a"), lib_b)
@@ -319,7 +327,8 @@ fn main(argc i32, argv addr) i32 {
         return 1
     }
 
-    // 8. 4 concurrent links on separate threads (pool_start_on, own worker pools)
+    // 8. Four link jobs, with independently configured worker pools. Tiers
+    // can cap concurrency while still running all four jobs.
     cctx ConcurrentCtx = {
         .ref_static = ref_static,
         .ref_shared = ref_shared,
@@ -328,9 +337,10 @@ fn main(argc i32, argv addr) i32 {
         .lib_b = lib_b,
         .shared_b = shared_b,
         .ver_b = ver_b,
+        .inner_threads = inner_threads,
     }
     outer_p handle[Pool] = handle_from_addr(heap_alloc_zeroed(sizeof[Pool]))
-    outer handle[Pool] = pool_start_on(outer_p, 4)
+    outer handle[Pool] = pool_start_on(outer_p, outer_threads)
     pool_for(outer, 4, 1, &concurrent_link_job, &cctx)
     pool_stop(outer)
     heap_free(handle_addr(outer_p))

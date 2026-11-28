@@ -1,0 +1,26 @@
+# STATUS SUITE/PATH REASON
+# Each entry records one deliberate difference from the corpus oracles.
+unexpected-reject headers/tgmath.h The absolute glibc include hits a float-type guard under the fcc GCC 4.2 compatibility macros
+oracle-timeout headers/pybind11/numpy.h Clang 22 hangs in syntax-only mode after diagnosing missing Python.h (upstream-bugs.md item 12)
+oracle-timeout headers/pybind11/eigen.h This reaches the Clang 22 pybind11/numpy.h hang through pybind11/eigen/matrix.h
+oracle-timeout headers/pybind11/eigen/matrix.h This reaches the Clang 22 pybind11/numpy.h hang through pybind11 Eigen support
+oracle-timeout headers/pybind11/eigen/tensor.h This reaches the Clang 22 pybind11/numpy.h hang through pybind11 Eigen support
+unexpected-reject compile-only/gcc/gcc/testsuite/gcc.dg/c23-generic-2.c Relies on the C2Y type-name controlling operand for _Generic
+unexpected-reject compile-only/gcc/gcc/testsuite/gcc.dg/c23-generic-3.c Relies on the C2Y type-name controlling operand for _Generic
+unexpected-reject compile-only/gcc/gcc/testsuite/gcc.dg/c23-generic-4.c Relies on the C2Y type-name controlling operand for _Generic
+unexpected-reject compile-only/gcc/gcc/testsuite/gcc.dg/c2y-generic-1.c Relies on the C2Y type-name controlling operand for _Generic
+unexpected-reject compile-only/gcc/gcc/testsuite/gcc.dg/c2y-generic-2.c Relies on the C2Y type-name controlling operand for _Generic
+unexpected-reject compile-only/gcc/gcc/testsuite/gcc.dg/gnu2y-generic-1.c Relies on the C2Y type-name controlling operand for _Generic
+unexpected-reject compile-only/gcc/gcc/testsuite/gcc.dg/c23-octal-constants-1.c Relies on C2Y explicit-octal integer prefixes
+unexpected-reject compile-only/gcc/gcc/testsuite/gcc.dg/c2y-octal-constants-1.c Relies on C2Y explicit-octal integer prefixes
+unexpected-reject compile-only/gcc/gcc/testsuite/gcc.dg/c2y-octal-constants-2.c Relies on C2Y explicit-octal integer prefixes
+unexpected-reject compile-only/gcc/gcc/testsuite/gcc.dg/octal-constants-1.c Relies on C2Y explicit-octal integer prefixes
+unexpected-reject compile-only/gcc/gcc/testsuite/gcc.dg/octal-constants-2.c Relies on C2Y explicit-octal integer prefixes
+unexpected-reject compile-only/gcc/gcc/testsuite/gcc.dg/system-octal-constants-1.c Relies on C2Y explicit-octal integer prefixes
+unexpected-reject compile-only/gcc/gcc/testsuite/gcc.dg/bitint-112.c Uses the C2Y 0o prefix on a bit-precise integer literal
+unexpected-reject compile-only/gcc/gcc/testsuite/gcc.dg/c2y-digit-separators-1.c Uses C2Y explicit-octal integer prefixes in digit separator tests
+unexpected-reject compile-only/llvm/clang/test/C/C2y/n3260.c Exercises the C2Y type-name controlling operand for _Generic
+unexpected-reject compile-only/llvm/clang/test/Sema/c23-fixed-underlying-enum.c Exercises fixed-underlying enums with a C2Y _Generic type-name controlling operand
+unexpected-reject headers/afl/t1ha0_ia32aes_b.h AFL only includes x86intrin.h for GCC >= 4.4 or when __clang__ is defined. Clang with -U__clang__ reproduces the undeclared __m128i error.
+unexpected-reject compile-only/llvm/clang/test/Lexer/rdar-8914293.c GCC and Clang warn about quotes left unterminated in unused macro replacement lists. FCC treats unterminated literals as errors.
+unexpected-reject compile-only/gcc/gcc/testsuite/gcc.dg/pr103207.c The case label multiplies two signed ints past INT_MAX. FCC diagnoses signed overflow in constant expressions as an error. GCC and Clang warn and continue.

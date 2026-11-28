@@ -2,13 +2,6 @@
 // equality for all structural types; nominal identity for struct/union/enum).
 // All state lives in TypeCtx behind a single thread-local handle `tc`.
 
-use "../lib/core.fas"
-use "../lib/mem.fas"
-use "../lib/vec.fas"
-use "../lib/bytes.fas"
-use "../lib/table.fas"
-use "../lib/intern.fas"
-
 // ---------- TypeId constants (pre-interned in tc_init) ----------
 const TY_INVALID u32     = 0
 const TY_VOID u32        = 1
@@ -35,6 +28,8 @@ const TY_COMPLEX_F16 u32 = 21
 const TY_COMPLEX_F32 u32 = 22
 const TY_COMPLEX_F64 u32 = 23
 const TY_COMPLEX_F80 u32 = 24
+const TY_BFLOAT16 u32    = 25
+const TY_FLOAT128 u32    = 26
 
 // ---------- Type kind constants ----------
 const TYK_VOID u8      = 0
@@ -67,6 +62,8 @@ const TYK_STRUCT u8    = 26
 const TYK_UNION u8     = 27
 const TYK_ENUM u8      = 28
 const TYK_QUAL u8      = 29
+const TYK_BFLOAT16 u8  = 30
+const TYK_FLOAT128 u8  = 31
 
 // ---------- Qualifiers & flags ----------
 const Q_NONE u32     = 0
@@ -75,9 +72,13 @@ const Q_VOLATILE u32 = 2
 const Q_RESTRICT u32 = 4
 const Q_ATOMIC u32   = 8
 const Q_PACKED u32   = 16
+const Q_TYPEDEF_ALIGN u32 = 32
+const Q_TRANSPARENT_UNION u32 = 64
 
 const TYF_UNSIGNED u32 = 1
 const TYF_VARIADIC u32 = 2
+const TYF_MS_ABI u32 = 4
+const TYF_NO_PROTO u32 = 8 // pre-C23 empty parameter list in a declaration
 
 // Array sub-kinds (stored in TypeNode.sub)
 const ARR_FIXED u32      = 0
@@ -97,6 +98,8 @@ struct TypeNode {
                     // arr_kind (ARRAY)
     aux2 u32        // params_len (FUNC), vla_expr (ARRAY VLA)
     arr_len u64     // element count for ARR_FIXED
+    ptr_ty u32      // cached ty_ptr(this), 0 = not yet interned
+    const_ty u32    // cached ty_qual(this, Q_CONST), 0 = not yet interned
 }
 
 struct FieldDef {
@@ -104,6 +107,7 @@ struct FieldDef {
     ty u32            // field TypeId
     bit_width u32     // bitfield width (0 for zero-width bitfield)
     align_attr u32    // explicit __attribute__((aligned(N))), 0 = none
+    counted_by u32    // sibling field supplying the element count, 0 = none
     is_bitfield bool
     is_anon bool
     is_packed bool
@@ -123,17 +127,28 @@ struct RecordDef {
     is_packed bool
     layout_done bool
     has_flex_array bool
-    _pad0 u8
-    _pad1 u16
+    transparent_union bool
+    is_ms_layout bool
+    is_unavailable bool
+    is_transaction_safe bool
     size u64
     align u64
+}
+
+struct EnumMember {
+    name u32
+    negative bool
+    value u64
 }
 
 struct EnumDef {
     tag_id u32
     underlying u32    // underlying integer TypeId
+    members_start u32
+    members_len u32
     is_complete bool
     has_fixed_underlying bool
+    is_unavailable bool
     _pad u16
 }
 
@@ -204,13 +219,16 @@ fn fn_key_eq(a handle[FnKey], b handle[FnKey]) bool {
 
 struct TypeCtx {
     nodes Vec[TypeNode]
+    unsigned_char bool
+    ilp32 bool
     fn_params Vec[u32]
     records Vec[RecordDef]
     fields Vec[FieldDef]
     enums Vec[EnumDef]
+    enum_members Vec[EnumMember]
     intern_ty Table[TyKey, u32, ty_key_hash, ty_key_eq]
     intern_fn Table[FnKey, u32, fn_key_hash, fn_key_eq]
-    names Intern
+    syms handle[SymTable]
 }
 
 thread var tc handle[TypeCtx] = null
@@ -236,16 +254,14 @@ fn tc_intern_prim(kind u8, flags u32) u32 {
     return id
 }
 
-fn tc_init(ctx handle[TypeCtx]) void {
+fn tc_init(ctx handle[TypeCtx], syms handle[SymTable]) void {
     mem_set(handle_addr(ctx), 0, sizeof[TypeCtx])
+    ctx.syms = syms
     tc = ctx
     // Slot 0 = TY_INVALID
     empty_node TypeNode = {}
     z0 u32 = tc_push_node(&empty_node)
     assert(z0 == 0)
-    // Intern empty string as name id 0 so 0 means unnamed
-    z1 u32 = intern(&tc.names, bytes_c(c""))
-    assert(z1 == 0)
 
     // Pre-intern all primitive types at fixed IDs 1..20
     assert(tc_intern_prim(TYK_VOID, 0) == TY_VOID)
@@ -274,6 +290,8 @@ fn tc_init(ctx handle[TypeCtx]) void {
     assert(ty_complex(TY_FLOAT) == TY_COMPLEX_F32)
     assert(ty_complex(TY_DOUBLE) == TY_COMPLEX_F64)
     assert(ty_complex(TY_LDOUBLE) == TY_COMPLEX_F80)
+    assert(tc_intern_prim(TYK_BFLOAT16, 0) == TY_BFLOAT16)
+    assert(tc_intern_prim(TYK_FLOAT128, 0) == TY_FLOAT128)
 }
 
 fn tc_free(ctx handle[TypeCtx]) void {
@@ -282,22 +300,22 @@ fn tc_free(ctx handle[TypeCtx]) void {
     vec_free(&ctx.records)
     vec_free(&ctx.fields)
     vec_free(&ctx.enums)
+    vec_free(&ctx.enum_members)
     table_free(&ctx.intern_ty)
     table_free(&ctx.intern_fn)
-    intern_free(&ctx.names)
     if tc == ctx { tc = null }
 }
 
 fn tc_intern_name(s Bytes) u32 {
-    return intern(&tc.names, s)
+    return sym_intern_b(tc.syms, s)
 }
 
 fn tc_intern_cstr(s addr) u32 {
-    return intern(&tc.names, bytes_c(s))
+    return sym_intern_c(tc.syms, s)
 }
 
 fn tc_name_bytes(id u32) Bytes {
-    return intern_name(&tc.names, id)
+    return sym_name(tc.syms, id)
 }
 
 // ---------- Node accessors ----------
@@ -352,10 +370,14 @@ fn ty_complex(elem u32) u32 {
 }
 
 fn ty_ptr(pointee u32) u32 {
+    cached u32 = ty_node(pointee).ptr_ty
+    if cached != 0 { return cached }
     k TyKey = {}
     k.kind = TYK_PTR
     k.elem = pointee
-    return tc_intern_struct_node(&k)
+    id u32 = tc_intern_struct_node(&k)
+    ty_node(pointee).ptr_ty = id
+    return id
 }
 
 fn ty_array(elem u32, n_elems u64) u32 {
@@ -395,16 +417,38 @@ fn ty_vector(elem u32, total_bytes u32) u32 {
 // Qualify a type with const/volatile/restrict/_Atomic/packed and/or aligned(N).
 // Merges cleanly with an existing TYK_QUAL wrapper so TYK_QUAL never nests.
 fn ty_qual_attr(tid u32, quals u32, align_attr u32) u32 {
+    if quals == 0 && align_attr == 0 { return tid }
+    n handle[TypeNode] = ty_node(tid)
+    if quals == Q_CONST && align_attr == 0 && n.kind != TYK_QUAL && n.kind != TYK_ARRAY {
+        if n.const_ty != 0 { return n.const_ty }
+        k TyKey = {}
+        k.kind = TYK_QUAL
+        k.flags = Q_CONST
+        k.elem = tid
+        id u32 = tc_intern_struct_node(&k)
+        ty_node(tid).const_ty = id
+        return id
+    }
     base u32 = tid
     q u32 = quals
     al u32 = align_attr
-    n handle[TypeNode] = ty_node(tid)
     if n.kind == TYK_QUAL {
         base = n.elem
         q = q | n.flags
         if n.aux1 > al { al = n.aux1 }
     }
     if q == 0 && al == 0 { return base }
+    // C23 array qualifiers apply to the elements. Canonicalize qualification
+    // through a typedef to the same type as a qualified element declaration.
+    cv u32 = q & (Q_CONST | Q_VOLATILE | Q_RESTRICT)
+    if cv != 0 && ty_is_array(base) {
+        array TypeNode = {}
+        copy_into(&array, ty_node(base))
+        elem u32 = ty_qual_attr(array.elem, cv, 0)
+        q &= ~cv
+        base = ty_array_replace_elem(&array, elem)
+        if q == 0 && al == 0 { return base }
+    }
     k TyKey = {}
     k.kind = TYK_QUAL
     k.flags = q
@@ -421,6 +465,16 @@ fn ty_aligned(tid u32, align_bytes u32) u32 {
     return ty_qual_attr(tid, 0, align_bytes)
 }
 
+// GNU typedef alignment can decrease the alignment without changing the size.
+fn ty_typedef_aligned(tid u32, align_bytes u32) u32 {
+    return ty_qual_attr(tid, Q_TYPEDEF_ALIGN, align_bytes)
+}
+
+fn ty_has_typedef_alignment(tid u32) bool {
+    n handle[TypeNode] = ty_node(tid)
+    return n.kind == TYK_QUAL && (n.flags & Q_TYPEDEF_ALIGN) != 0
+}
+
 fn ty_packed(tid u32) u32 {
     return ty_qual_attr(tid, Q_PACKED, 0)
 }
@@ -430,30 +484,62 @@ fn ty_typeof(tid u32) u32 {
     return tid
 }
 
-// C23 typeof_unqual(T): strips top-level qualifiers (const/volatile/restrict/_Atomic)
-// while keeping layout attributes if any? Per C23 6.7.2.5, typeof_unqual removes
-// all qualifiers including _Atomic.
+fn ty_array_replace_elem(array handle[TypeNode], elem u32) u32 {
+    if array.aux1 == ARR_FIXED { return ty_array(elem, array.arr_len) }
+    if array.aux1 == ARR_VLA { return ty_array_vla(elem, array.aux2) }
+    return ty_array_incomplete(elem)
+}
+
+// The atomic qualifier on an array element belongs to the element type,
+// whereas the array and element share const, volatile, and restrict.
 fn ty_typeof_unqual(tid u32) u32 {
-    return ty_unqual(tid)
+    base u32 = ty_unqual(tid)
+    if !ty_is_array(base) { return base }
+    array TypeNode = {}
+    copy_into(&array, ty_node(base))
+    elem u32 = ty_array_unqual_elem(array.elem)
+    return if elem == array.elem { base } else { ty_array_replace_elem(&array, elem) }
+}
+
+fn ty_array_unqual_elem(tid u32) u32 {
+    if ty_is_array(tid) { return ty_typeof_unqual(tid) }
+    return ty_qual(ty_unqual(tid), ty_quals(tid) & Q_ATOMIC)
 }
 
 // Function type constructor. C23: empty parameter list () means (void).
 fn ty_func(ret u32, params addr, n_params u32, is_variadic bool) u32 {
-    f u32 = if is_variadic { TYF_VARIADIC } else { 0 }
+    return ty_func_flags(ret, params, n_params, if is_variadic { TYF_VARIADIC } else { 0 })
+}
+
+fn ty_func_flags(ret u32, params addr, n_params u32, flags u32) u32 {
     start u32 = trunc[u32](tc.fn_params.n)
     for i u32 in 0..n_params {
         p u32 = params[u32, zext[usize](i)]
         vec_push(&tc.fn_params, p)
     }
+    id u32 = tc_intern_func(ret, start, n_params, flags)
+    if ty_node(id).aux1 != start { tc.fn_params.n = zext[usize](start) }
+    return id
+}
+
+// Calling convention is part of the function type. Reuse its interned
+// parameter slice when applying a convention to an existing prototype.
+fn ty_func_ms_abi(ty u32) u32 {
+    f handle[TypeNode] = ty_node(ty_unqual(ty))
+    return ty_qual_attr(tc_intern_func(f.elem, f.aux1, f.aux2, f.flags | TYF_MS_ABI),
+        ty_quals(ty), ty_align_attr(ty))
+}
+
+fn tc_intern_func(ret u32, start u32, n_params u32, flags u32) u32 {
     k FnKey = {}
     k.ret = ret
-    k.flags = f
+    k.flags = flags
     k.params_start = start
     k.params_len = n_params
     existing u32 = table_get(&tc.intern_fn, &k) catch {
         n TypeNode = {}
         n.kind = TYK_FUNC
-        n.flags = f
+        n.flags = flags
         n.elem = ret
         n.aux1 = start
         n.aux2 = n_params
@@ -461,8 +547,6 @@ fn ty_func(ret u32, params addr, n_params u32, is_variadic bool) u32 {
         _ bool = table_put(&tc.intern_fn, &k, id)
         return id
     }
-    // Deduplicated: roll back the temporary param slice
-    tc.fn_params.n = zext[usize](start)
     return existing
 }
 
@@ -525,30 +609,91 @@ fn ty_enum_complete(tid u32, underlying u32) void {
     e.is_complete = true
 }
 
+fn ty_enum_member_less(a handle[EnumMember], b handle[EnumMember]) bool {
+    return a.name < b.name
+}
+
+// Keep member values sorted by identifier since enumerator order does not
+// enter type compatibility. Parser-produced definitions are never empty.
+fn ty_enum_set_members(ty u32, members handle[Vec[EnumMember]]) void {
+    sort_vec_by[EnumMember, ty_enum_member_less](members)
+    e handle[EnumDef] = ty_enum(ty_node(ty_unqual(ty)).aux1)
+    e.members_start = trunc[u32](tc.enum_members.n)
+    e.members_len = trunc[u32](members.n)
+    for i usize in 0..members.n {
+        copy_into(vec_add(&tc.enum_members), vec_at(members, i))
+    }
+}
+
+fn ty_enum_member_at(e handle[EnumDef], i u32) handle[EnumMember] {
+    return vec_at(&tc.enum_members, zext[usize](e.members_start + i))
+}
+
+fn ty_enum_find_member(e handle[EnumDef], name u32) handle[EnumMember] {
+    lo u32 = 0
+    hi u32 = e.members_len
+    while lo < hi {
+        i u32 = lo + (hi - lo) / 2
+        m handle[EnumMember] = ty_enum_member_at(e, i)
+        if name == m.name { return m }
+        if name < m.name { hi = i } else { lo = i + 1 }
+    }
+    return null
+}
+
 // ---------- Type inspection helpers ----------
 
 fn ty_unqual(tid u32) u32 {
+    if tid <= TY_FLOAT128 { return tid }
     n handle[TypeNode] = ty_node(tid)
     if n.kind == TYK_QUAL { return n.elem }
     return tid
 }
 
 fn ty_quals(tid u32) u32 {
+    if tid <= TY_FLOAT128 { return 0 }
     n handle[TypeNode] = ty_node(tid)
     if n.kind == TYK_QUAL { return n.flags & 15 }
     return 0
 }
 
 fn ty_align_attr(tid u32) u32 {
+    if tid <= TY_FLOAT128 { return 0 }
     n handle[TypeNode] = ty_node(tid)
     if n.kind == TYK_QUAL { return n.aux1 }
     return 0
 }
 
 fn ty_has_packed_attr(tid u32) bool {
+    if tid <= TY_FLOAT128 { return false }
     n handle[TypeNode] = ty_node(tid)
     if n.kind == TYK_QUAL { return (n.flags & Q_PACKED) != 0 }
     return false
+}
+
+fn ty_has_transparent_attr(tid u32) bool {
+    if tid <= TY_FLOAT128 { return false }
+    n handle[TypeNode] = ty_node(tid)
+    return n.kind == TYK_QUAL && (n.flags & Q_TRANSPARENT_UNION) != 0
+}
+
+fn ty_transparent_first(ty u32) u32 {
+    n handle[TypeNode] = ty_node(ty_unqual(ty))
+    if n.kind != TYK_UNION { return TY_INVALID }
+    r handle[RecordDef] = ty_record(n.aux1)
+    if !r.is_complete || r.fields_len == 0 || !(r.transparent_union || ty_has_transparent_attr(ty)) { return TY_INVALID }
+    first handle[FieldDef] = ty_field(r.fields_start)
+    if first.is_bitfield || first.name_id == 0 || !ty_is_scalar(first.ty) { return TY_INVALID }
+    size u64 = ty_size(first.ty)
+    first_ty u32 = ty_unqual(first.ty)
+    floating bool = ty_is_floating(first_ty)
+    for i u32 in 1..r.fields_len {
+        f handle[FieldDef] = ty_field(r.fields_start + i)
+        if f.is_bitfield || !ty_is_scalar(f.ty) || ty_size(f.ty) != size ||
+            ty_is_floating(f.ty) != floating ||
+            (floating && ty_unqual(f.ty) != first_ty) { return TY_INVALID }
+    }
+    return first.ty
 }
 
 fn ty_kind(tid u32) u8 {
@@ -565,60 +710,125 @@ fn ty_canon_int(tid u32) u32 {
     return u
 }
 
-fn ty_is_void(tid u32) bool { return ty_kind(tid) == TYK_VOID }
-fn ty_is_bool(tid u32) bool { return ty_kind(tid) == TYK_BOOL }
-fn ty_is_ptr(tid u32) bool { return ty_kind(tid) == TYK_PTR }
-fn ty_is_array(tid u32) bool { return ty_kind(tid) == TYK_ARRAY }
-fn ty_is_func(tid u32) bool { return ty_kind(tid) == TYK_FUNC }
+fn ty_is_void(tid u32) bool {
+    if tid == TY_VOID { return true }
+    if tid <= TY_FLOAT128 { return false }
+    return ty_kind(tid) == TYK_VOID
+}
+fn ty_is_bool(tid u32) bool {
+    if tid == TY_BOOL { return true }
+    if tid <= TY_FLOAT128 { return false }
+    return ty_kind(tid) == TYK_BOOL
+}
+fn ty_is_ptr(tid u32) bool {
+    if tid <= TY_FLOAT128 { return false }
+    return ty_kind(tid) == TYK_PTR
+}
+fn ty_is_array(tid u32) bool {
+    if tid <= TY_FLOAT128 { return false }
+    return ty_kind(tid) == TYK_ARRAY
+}
+fn ty_is_func(tid u32) bool {
+    if tid <= TY_FLOAT128 { return false }
+    return ty_kind(tid) == TYK_FUNC
+}
 fn ty_is_record(tid u32) bool {
+    if tid <= TY_FLOAT128 { return false }
     k u8 = ty_kind(tid)
     return k == TYK_STRUCT || k == TYK_UNION
 }
-fn ty_is_enum(tid u32) bool { return ty_kind(tid) == TYK_ENUM }
-fn ty_is_bitint(tid u32) bool { return ty_kind(tid) == TYK_BITINT }
-fn ty_is_vector(tid u32) bool { return ty_kind(tid) == TYK_VECTOR }
-fn ty_is_complex(tid u32) bool { return ty_kind(tid) == TYK_COMPLEX }
-fn ty_is_nullptr(tid u32) bool { return ty_kind(tid) == TYK_NULLPTR }
+fn ty_is_enum(tid u32) bool {
+    if tid <= TY_FLOAT128 { return false }
+    return ty_kind(tid) == TYK_ENUM
+}
+fn ty_is_bitint(tid u32) bool {
+    if tid <= TY_FLOAT128 { return false }
+    return ty_kind(tid) == TYK_BITINT
+}
+fn ty_is_vector(tid u32) bool {
+    if tid <= TY_FLOAT128 { return false }
+    return ty_kind(tid) == TYK_VECTOR
+}
+fn ty_is_complex(tid u32) bool {
+    if tid <= TY_FLOAT128 { return tid >= TY_COMPLEX_F16 && tid <= TY_COMPLEX_F80 }
+    return ty_kind(tid) == TYK_COMPLEX
+}
+fn ty_is_nullptr(tid u32) bool {
+    if tid == TY_NULLPTR { return true }
+    if tid <= TY_FLOAT128 { return false }
+    return ty_kind(tid) == TYK_NULLPTR
+}
 
 fn ty_is_integer(tid u32) bool {
+    if tid >= TY_BOOL && tid <= TY_UINT128 { return true }
+    if tid <= TY_FLOAT128 { return false }
     k u8 = ty_kind(tid)
     return (k >= TYK_BOOL && k <= TYK_BITINT) || k == TYK_ENUM
 }
 
 fn ty_is_real_float(tid u32) bool {
+    if tid <= TY_FLOAT128 {
+        return (tid >= TY_FLOAT16 && tid <= TY_LDOUBLE) || tid == TY_BFLOAT16 || tid == TY_FLOAT128
+    }
     k u8 = ty_kind(tid)
-    return k >= TYK_FLOAT16 && k <= TYK_LDOUBLE
+    return (k >= TYK_FLOAT16 && k <= TYK_LDOUBLE) || k == TYK_BFLOAT16 || k == TYK_FLOAT128
 }
 
 fn ty_is_floating(tid u32) bool {
-    k u8 = ty_kind(tid)
-    if k >= TYK_FLOAT16 && k <= TYK_LDOUBLE { return true }
+    if tid <= TY_FLOAT128 {
+        return (tid >= TY_FLOAT16 && tid <= TY_LDOUBLE) || (tid >= TY_COMPLEX_F16 && tid <= TY_FLOAT128)
+    }
+    u u32 = ty_unqual(tid)
+    n handle[TypeNode] = ty_node(u)
+    k u8 = n.kind
+    if (k >= TYK_FLOAT16 && k <= TYK_LDOUBLE) || k == TYK_BFLOAT16 || k == TYK_FLOAT128 { return true }
     if k == TYK_COMPLEX {
-        return ty_is_real_float(ty_node(ty_unqual(tid)).elem)
+        return ty_is_real_float(n.elem)
     }
     return false
 }
 
 fn ty_is_arith(tid u32) bool {
-    return ty_is_integer(tid) || ty_is_floating(tid) || ty_is_complex(tid)
+    if tid >= TY_BOOL && tid <= TY_FLOAT128 { return tid != TY_NULLPTR }
+    if tid <= TY_FLOAT128 { return false }
+    k u8 = ty_kind(tid)
+    return (k >= TYK_BOOL && k <= TYK_COMPLEX) || k == TYK_ENUM || k == TYK_BFLOAT16 || k == TYK_FLOAT128
 }
 
 fn ty_is_scalar(tid u32) bool {
-    return ty_is_arith(tid) || ty_is_ptr(tid) || ty_is_nullptr(tid)
+    if tid >= TY_BOOL && tid <= TY_FLOAT128 { return true }
+    if tid <= TY_FLOAT128 { return false }
+    k u8 = ty_kind(tid)
+    return (k >= TYK_BOOL && k <= TYK_PTR) || k == TYK_ENUM || k == TYK_BFLOAT16 || k == TYK_FLOAT128
 }
 
 fn ty_is_unsigned(tid u32) bool {
+    if tid == TY_INT || tid == TY_LONG || tid == TY_LLONG || tid == TY_SHORT || tid == TY_SCHAR || tid == TY_INT128 { return false }
+    if tid == TY_UINT || tid == TY_ULONG || tid == TY_ULLONG || tid == TY_USHORT || tid == TY_UCHAR || tid == TY_BOOL || tid == TY_UINT128 { return true }
+    if tid == TY_CHAR { return tc.unsigned_char }
     c u32 = ty_canon_int(tid)
     n handle[TypeNode] = ty_node(c)
-    return (n.flags & TYF_UNSIGNED) != 0
+    return (n.flags & TYF_UNSIGNED) != 0 || (n.kind == TYK_CHAR && tc.unsigned_char)
 }
 
 fn ty_is_signed(tid u32) bool {
     return ty_is_integer(tid) && !ty_is_unsigned(tid)
 }
 
+fn ty_size_type() u32 { return if tc.ilp32 { TY_UINT } else { TY_ULONG } }
+fn ty_ptrdiff_type() u32 { return if tc.ilp32 { TY_INT } else { TY_LONG } }
+fn ty_int64_type() u32 { return if tc.ilp32 { TY_LLONG } else { TY_LONG } }
+fn ty_uint64_type() u32 { return if tc.ilp32 { TY_ULLONG } else { TY_ULONG } }
+
 // Bit width of an integer type (for promotions & usual arithmetic conversions)
 fn ty_int_bits(tid u32) u32 {
+    if tid == TY_INT || tid == TY_UINT { return 32 }
+    if tid == TY_LONG || tid == TY_ULONG { return if tc.ilp32 { 32 } else { 64 } }
+    if tid == TY_LLONG || tid == TY_ULLONG { return 64 }
+    if tid == TY_CHAR || tid == TY_SCHAR || tid == TY_UCHAR { return 8 }
+    if tid == TY_SHORT || tid == TY_USHORT { return 16 }
+    if tid == TY_BOOL { return 1 }
+    if tid == TY_INT128 || tid == TY_UINT128 { return 128 }
     c u32 = ty_canon_int(tid)
     n handle[TypeNode] = ty_node(c)
     k u8 = n.kind
@@ -626,7 +836,7 @@ fn ty_int_bits(tid u32) u32 {
     if k == TYK_CHAR || k == TYK_SCHAR || k == TYK_UCHAR { return 8 }
     if k == TYK_SHORT || k == TYK_USHORT { return 16 }
     if k == TYK_INT || k == TYK_UINT { return 32 }
-    if k == TYK_LONG || k == TYK_ULONG { return 64 }
+    if k == TYK_LONG || k == TYK_ULONG { return if tc.ilp32 { 32 } else { 64 } }
     if k == TYK_LLONG || k == TYK_ULLONG { return 64 }
     if k == TYK_INT128 || k == TYK_UINT128 { return 128 }
     if k == TYK_BITINT { return n.aux1 }
@@ -693,10 +903,11 @@ fn ty_integer_promote(tid u32) u32 {
 
 fn ty_float_rank(tid u32) u32 {
     k u8 = ty_kind(tid)
-    if k == TYK_FLOAT16 { return 1 }
+    if k == TYK_FLOAT16 || k == TYK_BFLOAT16 { return 1 }
     if k == TYK_FLOAT { return 2 }
     if k == TYK_DOUBLE { return 3 }
     if k == TYK_LDOUBLE { return 4 }
+    if k == TYK_FLOAT128 { return 5 }
     return 0
 }
 
@@ -786,7 +997,19 @@ fn ty_usual_arith_conv(t1 u32, t2 u32) u32 {
 
 // ---------- C23 Type Compatibility & Composite Types (6.2.7) ----------
 
+// Track record pairs along the active recursion so self-referential
+// declarations can be compared without equating unrelated nominal types.
+struct TyCompare {
+    a u32
+    b u32
+    parent handle[TyCompare]
+}
+
 fn ty_compatible(a u32, b u32) bool {
+    return ty_compatible_impl(a, b, null, false)
+}
+
+fn ty_compatible_impl(a u32, b u32, path handle[TyCompare], anonymous bool) bool {
     if a == b { return true }
     // Top-level qualifiers must match
     if ty_quals(a) != ty_quals(b) { return false }
@@ -798,19 +1021,19 @@ fn ty_compatible(a u32, b u32) bool {
 
     // Enum is compatible with its underlying integer type (C23 6.7.2.2)
     if na.kind == TYK_ENUM && nb.kind != TYK_ENUM {
-        return ty_compatible(ty_enum(na.aux1).underlying, ub)
+        return ty_compatible_impl(ty_enum(na.aux1).underlying, ub, path, false)
     }
     if nb.kind == TYK_ENUM && na.kind != TYK_ENUM {
-        return ty_compatible(ua, ty_enum(nb.aux1).underlying)
+        return ty_compatible_impl(ua, ty_enum(nb.aux1).underlying, path, false)
     }
 
     if na.kind != nb.kind { return false }
 
     if na.kind == TYK_PTR {
-        return ty_compatible(na.elem, nb.elem)
+        return ty_compatible_impl(na.elem, nb.elem, path, false)
     }
     if na.kind == TYK_ARRAY {
-        if !ty_compatible(na.elem, nb.elem) { return false }
+        if !ty_compatible_impl(na.elem, nb.elem, path, false) { return false }
         if na.aux1 == ARR_FIXED && nb.aux1 == ARR_FIXED {
             return na.arr_len == nb.arr_len
         }
@@ -818,23 +1041,81 @@ fn ty_compatible(a u32, b u32) bool {
         return true
     }
     if na.kind == TYK_FUNC {
-        if (na.flags & TYF_VARIADIC) != (nb.flags & TYF_VARIADIC) { return false }
+        if !ty_compatible_impl(na.elem, nb.elem, path, false) { return false }
+        if ((na.flags ^ nb.flags) & ~TYF_NO_PROTO) != 0 { return false }
+        if ((na.flags ^ nb.flags) & TYF_NO_PROTO) != 0 {
+            proto handle[TypeNode] = if (na.flags & TYF_NO_PROTO) == 0 { na } else { nb }
+            for i u32 in 0..proto.aux2 {
+                param u32 = ty_unqual(vec_get(&tc.fn_params, zext[usize](proto.aux1 + i)))
+                // An unprototyped caller applies the default argument
+                // promotions. A prototype is compatible only if unchanged.
+                if param == TY_FLOAT { return false }
+                if ty_is_integer(param) && !ty_compatible_impl(param, ty_integer_promote(param), path, false) { return false }
+            }
+            return true
+        }
         if na.aux2 != nb.aux2 { return false }
-        if !ty_compatible(na.elem, nb.elem) { return false }
         for i u32 in 0..na.aux2 {
             pa u32 = vec_get(&tc.fn_params, zext[usize](na.aux1 + i))
             pb u32 = vec_get(&tc.fn_params, zext[usize](nb.aux1 + i))
-            if !ty_compatible(ty_unqual(pa), ty_unqual(pb)) { return false }
+            if !ty_compatible_impl(ty_unqual(pa), ty_unqual(pb), path, false) {
+                ma u32 = ty_transparent_first(pa)
+                mb u32 = ty_transparent_first(pb)
+                if !((ma != TY_INVALID && ty_compatible_impl(ty_unqual(ma), ty_unqual(pb), path, false)) ||
+                     (mb != TY_INVALID && ty_compatible_impl(ty_unqual(pa), ty_unqual(mb), path, false))) { return false }
+            }
         }
         return true
     }
     if na.kind == TYK_COMPLEX {
-        return ty_compatible(na.elem, nb.elem)
+        return ty_compatible_impl(na.elem, nb.elem, path, false)
     }
     if na.kind == TYK_VECTOR {
-        return na.aux1 == nb.aux1 && ty_compatible(na.elem, nb.elem)
+        return na.aux1 == nb.aux1 && ty_compatible_impl(na.elem, nb.elem, path, false)
     }
-    // Struct/union/enum with different IDs are distinct nominal types
+    if na.kind == TYK_ENUM {
+        ea handle[EnumDef] = ty_enum(na.aux1)
+        eb handle[EnumDef] = ty_enum(nb.aux1)
+        if !ea.is_complete || !eb.is_complete || ea.tag_id == 0 || ea.tag_id != eb.tag_id ||
+            ea.members_len != eb.members_len || ea.has_fixed_underlying != eb.has_fixed_underlying ||
+            ea.underlying != eb.underlying { return false }
+        for i u32 in 0..ea.members_len {
+            ma handle[EnumMember] = ty_enum_member_at(ea, i)
+            mb handle[EnumMember] = ty_enum_member_at(eb, i)
+            if ma.name != mb.name || ma.value != mb.value || ma.negative != mb.negative { return false }
+        }
+        return true
+    }
+    if na.kind == TYK_STRUCT || na.kind == TYK_UNION {
+        ra handle[RecordDef] = ty_record(na.aux1)
+        rb handle[RecordDef] = ty_record(nb.aux1)
+        if !ra.is_complete || !rb.is_complete || ra.tag_id != rb.tag_id ||
+            (ra.tag_id == 0 && !anonymous) || ra.fields_len != rb.fields_len ||
+            ra.align_attr != rb.align_attr || ra.is_packed != rb.is_packed || ra.pragma_pack != rb.pragma_pack ||
+            ra.is_ms_layout != rb.is_ms_layout || ra.is_transaction_safe != rb.is_transaction_safe {
+            return false
+        }
+        q handle[TyCompare] = path
+        while q != null {
+            if (q.a == ua && q.b == ub) || (q.a == ub && q.b == ua) { return true }
+            q = q.parent
+        }
+        pair TyCompare = {ua, ub, path}
+        for i u32 in 0..ra.fields_len {
+            fa handle[FieldDef] = ty_field(ra.fields_start + i)
+            fb handle[FieldDef] = ty_field(rb.fields_start + i)
+            if fa.name_id != fb.name_id || fa.is_anon != fb.is_anon || fa.is_bitfield != fb.is_bitfield ||
+                fa.bit_width != fb.bit_width || fa.align_attr != fb.align_attr || fa.is_packed != fb.is_packed ||
+                fa.counted_by != fb.counted_by ||
+                !ty_compatible_impl(fa.ty, fb.ty, &pair, fa.is_anon) { return false }
+            // A flexible member is a distinct record layout feature even
+            // though an ordinary incomplete array can compose with a bound.
+            if ty_is_array(fa.ty) && ty_is_array(fb.ty) &&
+                ((ty_node(ty_unqual(fa.ty)).aux1 == ARR_INCOMPLETE) !=
+                 (ty_node(ty_unqual(fb.ty)).aux1 == ARR_INCOMPLETE)) { return false }
+        }
+        return true
+    }
     return false
 }
 
@@ -842,26 +1123,41 @@ fn ty_compatible(a u32, b u32) bool {
 // Returns TY_INVALID if not compatible.
 fn ty_composite(a u32, b u32) u32 {
     if !ty_compatible(a, b) { return TY_INVALID }
+    return ty_composite_impl(a, b, null)
+}
+
+struct TyComposite {
+    a u32
+    b u32
+    result u32
+    parent handle[TyComposite]
+}
+
+fn ty_composite_impl(a u32, b u32, path handle[TyComposite]) u32 {
     if a == b { return a }
     q u32 = ty_quals(a)
     al u32 = ty_align_attr(a)
     if ty_align_attr(b) > al { al = ty_align_attr(b) }
+    if ty_has_typedef_alignment(a) || ty_has_typedef_alignment(b) { q |= Q_TYPEDEF_ALIGN }
+    if ty_has_transparent_attr(a) || ty_has_transparent_attr(b) { q |= Q_TRANSPARENT_UNION }
     ua u32 = ty_unqual(a)
     ub u32 = ty_unqual(b)
     if ua == ub { return ty_qual_attr(ua, q, al) }
 
-    na handle[TypeNode] = ty_node(ua)
-    nb handle[TypeNode] = ty_node(ub)
+    na TypeNode = {}
+    nb TypeNode = {}
+    copy_into(&na, ty_node(ua))
+    copy_into(&nb, ty_node(ub))
 
     if na.kind == TYK_ENUM { return ty_qual_attr(ua, q, al) }
     if nb.kind == TYK_ENUM { return ty_qual_attr(ub, q, al) }
 
     if na.kind == TYK_PTR {
-        ce u32 = ty_composite(na.elem, nb.elem)
+        ce u32 = ty_composite_impl(na.elem, nb.elem, path)
         return ty_qual_attr(ty_ptr(ce), q, al)
     }
     if na.kind == TYK_ARRAY {
-        ce u32 = ty_composite(na.elem, nb.elem)
+        ce u32 = ty_composite_impl(na.elem, nb.elem, path)
         res u32 = TY_INVALID
         if na.aux1 == ARR_FIXED {
             res = ty_array(ce, na.arr_len)
@@ -877,17 +1173,54 @@ fn ty_composite(a u32, b u32) u32 {
         return ty_qual_attr(res, q, al)
     }
     if na.kind == TYK_FUNC {
-        cret u32 = ty_composite(na.elem, nb.elem)
+        cret u32 = ty_composite_impl(na.elem, nb.elem, path)
+        if ((na.flags ^ nb.flags) & TYF_NO_PROTO) != 0 {
+            proto handle[TypeNode] = if (na.flags & TYF_NO_PROTO) == 0 { &na } else { &nb }
+            return ty_qual_attr(tc_intern_func(cret, proto.aux1, proto.aux2, proto.flags), q, al)
+        }
         n_p u32 = na.aux2
         tmp Vec[u32] = {}
         defer { vec_free(&tmp) }
         for i u32 in 0..n_p {
             pa u32 = vec_get(&tc.fn_params, zext[usize](na.aux1 + i))
             pb u32 = vec_get(&tc.fn_params, zext[usize](nb.aux1 + i))
-            vec_push(&tmp, ty_composite(ty_unqual(pa), ty_unqual(pb)))
+            param u32
+            if ty_transparent_first(pa) != TY_INVALID && ty_kind(pb) != TYK_UNION { param = pa }
+            else if ty_transparent_first(pb) != TY_INVALID && ty_kind(pa) != TYK_UNION { param = pb }
+            else { param = ty_composite_impl(pa, pb, path) }
+            vec_push(&tmp, param)
         }
-        res u32 = ty_func(cret, tmp.p, n_p, (na.flags & TYF_VARIADIC) != 0)
+        res u32 = ty_func_flags(cret, tmp.p, n_p, na.flags)
         return ty_qual_attr(res, q, al)
+    }
+    if na.kind == TYK_STRUCT || na.kind == TYK_UNION {
+        parent handle[TyComposite] = path
+        while parent != null {
+            if (parent.a == ua && parent.b == ub) || (parent.a == ub && parent.b == ua) {
+                return ty_qual_attr(parent.result, q, al)
+            }
+            parent = parent.parent
+        }
+        ra RecordDef = {}
+        rb RecordDef = {}
+        copy_into(&ra, ty_record(na.aux1))
+        copy_into(&rb, ty_record(nb.aux1))
+        fields Vec[FieldDef] = {}
+        defer { vec_free(&fields) }
+        result u32 = ty_record_new(ra.tag_id, ra.is_union)
+        pair TyComposite = {ua, ub, result, path}
+        for i u32 in 0..ra.fields_len {
+            f handle[FieldDef] = vec_add(&fields)
+            copy_into(f, ty_field(ra.fields_start + i))
+            other handle[FieldDef] = ty_field(rb.fields_start + i)
+            f.ty = ty_composite_impl(f.ty, other.ty, &pair)
+        }
+        ty_record_complete(result, fields.p, ra.fields_len, ra.is_packed, ra.align_attr, ra.pragma_pack)
+        rec handle[RecordDef] = ty_record(ty_node(result).aux1)
+        rec.transparent_union = ra.transparent_union || rb.transparent_union
+        rec.is_ms_layout = ra.is_ms_layout
+        rec.is_transaction_safe = ra.is_transaction_safe
+        return ty_qual_attr(result, q, al)
     }
     return ty_qual_attr(ua, q, al)
 }

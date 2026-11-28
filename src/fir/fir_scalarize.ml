@@ -45,8 +45,22 @@ let is_vec = function Vec _ -> true | _ -> false
 
 (* ---------- signatures ---------- *)
 
+(* Vectors that fit an XMM register pass via a full 16-byte image.
+   Wider vectors pass by reference, like an aggregate of that size. *)
+let vec_abi ms_abi t =
+  if not ms_abi || vec_bytes t > 16 then vec_agg t
+  else Agg { size = 16; align = 16; fields = [ (0, Leaf t) ] }
+
 let sig_of (s : signature) =
-  { s with param_abis = List.map abi_of s.param_abis; result_abis = List.map abi_of s.result_abis }
+  let convert = function
+    | Scalar (Vec _ as t) | Ext ((Vec _ as t), _) -> vec_abi s.ms_abi t
+    | a -> a
+  in
+  let ms_xmm_result =
+    s.ms_xmm_result ||
+    (s.ms_abi && match s.result_abis with [ Scalar (Vec _ as t) ] -> vec_bytes t <= 16 | _ -> false)
+  in
+  { s with param_abis = List.map convert s.param_abis; result_abis = List.map convert s.result_abis; ms_xmm_result }
 
 let abi_has_vec = function Scalar t | Ext (t, _) -> is_vec t | Agg _ | Cplx _ -> false
 let sig_changes (s : signature) = List.exists abi_has_vec s.param_abis || List.exists abi_has_vec s.result_abis
@@ -416,7 +430,7 @@ let call_args cx (s : signature) (args : value array) =
     Array.mapi
       (fun k x ->
         if vec_value cx x then begin
-          if k >= nfixed then va := (k, vec_agg (src_ty cx x)) :: !va;
+          if k >= nfixed then va := (k, vec_abi s.ms_abi (src_ty cx x)) :: !va;
           vec_in_mem cx x
         end
         else get1 cx x)
@@ -613,7 +627,16 @@ let rebuild_term cx (b : block) =
   | Switch (v, d, cases, w) ->
       set_term (Switch (get1 cx v, target_args cx d, Array.map (fun (key, t) -> (key, target_args cx t)) cases, w))
   | Indirect_br (v, bs) -> set_term (Indirect_br (get1 cx v, bs))
-  | Asm_goto g -> set_term (Asm_goto { g with aargs = Array.map (get1 cx) g.aargs })
+  | Asm_goto g ->
+      let aresults =
+        Array.mapi
+          (fun k r ->
+            let nr = new_value cx.g (Term_result (cx.b, k)) (ty_of cx.f r) in
+            set cx r [| nr |];
+            nr)
+          g.aresults
+      in
+      set_term (Asm_goto { g with aargs = Array.map (get1 cx) g.aargs; aresults })
   | Unreachable -> set_term Unreachable
 
 (* ---------- functions ---------- *)
@@ -622,11 +645,41 @@ let func_needs (f : func) =
   sig_changes f.sig_
   || (f.defined
      &&
+     let has_v2i64_asm = ref false in
+     Vec.iter
+       (fun (ir : inst_rec) ->
+         match ir.op with
+         | Asm _ ->
+             if Array.exists (fun r -> ty_of f r = Vec (2, Int 64)) ir.results then has_v2i64_asm := true;
+             iter_op_uses (fun u -> if ty_of f u = Vec (2, Int 64) then has_v2i64_asm := true) ir.op
+         | _ -> ())
+       f.insts;
      let found = ref false in
-     for v = 0 to num_values f - 1 do
-       if is_vec (ty_of f v) then found := true
-     done;
-     Vec.iter (fun (ir : inst_rec) -> match ir.op with Call c when sig_changes c.sig_ -> found := true | _ -> ()) f.insts;
+     Vec.iter
+       (fun (ir : inst_rec) ->
+         match ir.op with
+         | Call c when sig_changes c.sig_ -> found := true
+         | Load _ | Store _ | Asm _ when !has_v2i64_asm ->
+             (* 128-bit XMM asm operands (v2i64 produced by Fir_wide for i128 "x")
+                are handled directly by Mir_isel via Xload/Xstore; still scalarize
+                any vector constant or non-v2i64 vector. *)
+             let bad_vec u =
+               match ty_of f u with
+               | Vec (2, Int 64) -> const_of f u <> None
+               | Vec _ -> true
+               | _ -> false
+             in
+             if Array.exists bad_vec ir.results then found := true;
+             iter_op_uses (fun u -> if bad_vec u then found := true) ir.op
+         | _ ->
+             if Array.exists (fun r -> is_vec (ty_of f r)) ir.results then found := true;
+             iter_op_uses (fun u -> if is_vec (ty_of f u) then found := true) ir.op)
+       f.insts;
+     Vec.iter
+       (fun (b : block_rec) ->
+         if Array.exists (fun p -> is_vec (ty_of f p)) b.params then found := true;
+         iter_term_uses (fun u -> if is_vec (ty_of f u) then found := true) b.term)
+       f.blocks;
      !found)
 
 (* every lane becomes its own value, so the lane count is bounded: 4096
@@ -647,6 +700,9 @@ let rebuild_func (f : func) : func =
   let g = new_func ~linkage:f.linkage ~defined:f.defined f.name (sig_of f.sig_) in
   g.visibility <- f.visibility;
   g.fattrs <- f.fattrs;
+  g.code_section <- f.code_section;
+  g.patchable <- f.patchable;
+  g.unwind_cleanup <- f.unwind_cleanup;
   g.display <- f.display;
   g.decl_loc <- f.decl_loc;
   if not f.defined then g
@@ -691,6 +747,15 @@ let rebuild_func (f : func) : func =
     g
   end
 
+let run_func f =
+  if func_needs f then begin
+    let g = rebuild_func f in
+    (* lane loops split the entry block (Fir.hoist_const_allocas) *)
+    hoist_const_allocas g;
+    g
+  end
+  else f
+
 (* Rewrites [m] in place. Afterwards no value, signature or memory access
    has a vector type. *)
 let run (m : modul) =
@@ -698,11 +763,5 @@ let run (m : modul) =
      calls first, so none is left here (check_mem) *)
   Fir_atomic.run m;
   for i = 0 to Vec.length m.funcs - 1 do
-    let f = Vec.get m.funcs i in
-    if func_needs f then begin
-      let g = rebuild_func f in
-      (* lane loops split the entry block (Fir.hoist_const_allocas) *)
-      hoist_const_allocas g;
-      Vec.set m.funcs i g
-    end
+    Vec.set m.funcs i (run_func (Vec.get m.funcs i))
   done

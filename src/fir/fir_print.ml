@@ -69,7 +69,7 @@ let reduce_name = function
 let flag_names =
   [ (f_nsw, "nsw"); (f_nuw, "nuw"); (f_exact, "exact"); (f_disjoint, "disjoint");
     (f_inbounds, "inbounds"); (f_zero_poison, "zero_poison"); (f_contract, "contract");
-    (f_fast, "fast"); (f_poison_min, "poison_min"); (f_trap, "trap") ]
+    (f_fast, "fast"); (f_poison_min, "poison_min"); (f_trap, "trap"); (f_signaling, "signaling") ]
 
 let call_attr_names =
   [ (a_noreturn, "noreturn"); (a_returns_twice, "returns_twice"); (a_nounwind, "nounwind");
@@ -79,7 +79,7 @@ let func_attr_names =
   [ (fa_inline, "inline"); (fa_noinline, "noinline"); (fa_cold, "cold");
     (fa_noreturn, "noreturn"); (fa_fenv, "fenv"); (fa_mem_none, "memory(none)");
     (fa_mem_read, "memory(read)"); (fa_mem_argmem, "memory(argmem)"); (fa_willreturn, "willreturn");
-    (fa_secret, "secret") ]
+    (fa_secret, "secret"); (fa_nocf_check, "nocf_check") ]
 
 let linkage_name = function Local -> "local" | Global -> "global" | Weak -> "weak"
 
@@ -163,7 +163,8 @@ let assign_names f =
   Vec.iter
     (fun (b : block_rec) ->
       Array.iter name b.params;
-      Vec.iter (fun i -> Array.iter name (inst f i).results) b.insts)
+      Vec.iter (fun i -> Array.iter name (inst f i).results) b.insts;
+      (match b.term with Asm_goto { aresults; _ } -> Array.iter name aresults | _ -> ()))
     f.blocks;
   let busedb = Hashtbl.create 16 in
   let bnames =
@@ -247,7 +248,7 @@ let rec abi_text = function
 
 let sig_text s =
   let ps = List.map abi_text s.param_abis @ if s.variadic then [ "..." ] else [] in
-  "(" ^ String.concat ", " ps ^ ") -> (" ^ String.concat ", " (List.map abi_text s.result_abis) ^ ")"
+  (if s.ms_abi then "ms_abi " else "") ^ (if s.ms_xmm_result then "xmm_result " else "") ^ "(" ^ String.concat ", " ps ^ ") -> (" ^ String.concat ", " (List.map abi_text s.result_abis) ^ ")"
 
 let attrs_text table bits =
   String.concat ""
@@ -379,20 +380,27 @@ let term_text f nm = function
   | Indirect_br (x, bs) ->
       Printf.sprintf "indirect_br %s, [%s]" (value_text f nm x)
         (String.concat ", " (Array.to_list (Array.map (fun b -> label nm.bnames.(b)) bs)))
-  | Asm_goto { tmpl; aflags; ins; aargs; clobbers; fall; labels } ->
-      let body = op_text f nm { op = Asm { tmpl; aflags; outs = [||]; ins; aargs; clobbers }; results = [||]; loc = 0 } in
-      (* asm_goto prints no out(): drop it after the template, whose own
-         quotes are escaped, so the first quote-space-out() follows it *)
+  | Asm_goto { tmpl; aflags; outs; ins; aargs; aresults; clobbers; fall; labels } ->
+      let body = op_text f nm { op = Asm { tmpl; aflags; outs; ins; aargs; clobbers }; results = aresults; loc = 0 } in
       let body = String.sub body 4 (String.length body - 4) in
-      let pat = "\" out() " in
-      let n = String.length pat in
-      let rec find i =
-        if i + n > String.length body then body
-        else if String.sub body i n = pat then String.sub body 0 (i + 2) ^ String.sub body (i + n) (String.length body - i - n)
-        else find (i + 1)
+      (* drop empty out() when there are no outputs, keeping old compact form *)
+      let body =
+        if outs <> [||] then body
+        else
+          let pat = "\" out() " in
+          let n = String.length pat in
+          let rec find i =
+            if i + n > String.length body then body
+            else if String.sub body i n = pat then String.sub body 0 (i + 2) ^ String.sub body (i + n) (String.length body - i - n)
+            else find (i + 1)
+          in
+          find 0
       in
-      let body = find 0 in
-      Printf.sprintf "asm_goto %s %s [%s]" body (label nm.bnames.(fall))
+      let lhs =
+        if aresults = [||] then ""
+        else String.concat ", " (Array.to_list (Array.map (value_text f nm) aresults)) ^ " = "
+      in
+      Printf.sprintf "%sasm_goto %s %s [%s]" lhs body (label nm.bnames.(fall))
         (String.concat ", " (Array.to_list (Array.map (fun b -> label nm.bnames.(b)) labels)))
   | Ret [||] -> "ret"
   | Ret vs -> "ret " ^ String.concat ", " (Array.to_list (Array.map (value_text f nm) vs))
@@ -404,7 +412,10 @@ let func_header f =
     (symbol f.name) (sig_text f.sig_) (linkage_name f.linkage)
     (if f.visibility = Default then "" else " " ^ visibility_name f.visibility)
     ((if f.fattrs = 0 then "" else " " ^ String.trim (attrs_text func_attr_names f.fattrs))
+    ^ (match f.code_section with Some s -> " section " ^ quote s | None -> "")
+    ^ (match f.patchable with Some (n, m) -> Printf.sprintf " patchable(%d, %d)" n m | None -> "")
     ^ (match f.display with Some d -> " display " ^ quote d | None -> "")
+    ^ (match f.unwind_cleanup with Some (b, r) -> Printf.sprintf " !cleanup %d, %d" b r | None -> "")
     ^ if f.decl_loc <> 0 then Printf.sprintf " !loc %d" f.decl_loc else "")
 
 let print_func buf f =
@@ -421,6 +432,9 @@ let print_func buf f =
         if d.varg <> 0 then add (Printf.sprintf " arg %d" d.varg);
         if d.vloc <> 0 then add (Printf.sprintf " !loc %d" d.vloc);
         (match d.home with Some v -> add (" at " ^ value_text f nm (resolve f v)) | None -> ());
+        Option.iter (fun (name, tls) -> add (" at " ^ symbol name ^ if tls then " tls" else "")) d.vsymbol;
+        if d.vstack then add " stack";
+        if d.vindirect then add " indirect";
         add "\n")
       f.vars;
     Vec.iteri
@@ -464,6 +478,8 @@ let piece_text = function
   | Bytes s -> "bytes " ^ quote s
   | Zeros n -> "zeros " ^ string_of_int n
   | Blockref { fn; block } -> Printf.sprintf "blockaddr(%s, %d)" (symbol fn) block
+  | Blockdiff { fn; lhs; rhs; width } ->
+      Printf.sprintf "blockdiff(%s, %d, %d, %d)" (symbol fn) lhs rhs width
   | Reloc { sym; addend; width; pcrel } ->
       Printf.sprintf "reloc %s%s%s w%d" (symbol sym)
         (if addend = 0L then ""
@@ -481,6 +497,7 @@ let print_global buf g =
        (if g.readonly then " readonly" else "")
        (if g.thread_local then " thread_local" else "")
        (if not g.gdefined then "extern"
+        else if g.gcommon then "common"
         else
           match g.init with
           | None -> "zero"
@@ -500,10 +517,16 @@ let dtype_text = function
         | None -> "declared"
         | Some n ->
             Printf.sprintf "size %d {%s}" n
-              (String.concat ", " (List.map (fun (m, t, o) -> Printf.sprintf "%s %d %d" (quote m) t o) members)))
+              (String.concat ", " (List.map (fun m ->
+                Printf.sprintf "%s %d %d%s" (quote m.member_name) m.member_type m.member_offset
+                  (match m.member_bits with Some bits -> Printf.sprintf " bits %d" bits | None -> "")) members)))
   | Darray (t, n) -> Printf.sprintf "array %d count %d" t n
   | Dvector (t, n) -> Printf.sprintf "vector %d count %d" t n
   | Dtypedef (name, t) -> Printf.sprintf "typedef %s %d" (quote name) t
+  | Dsubroutine (result, params, variadic) ->
+      Printf.sprintf "subroutine %d {%s}%s" result
+        (String.concat ", " (List.map string_of_int params))
+        (if variadic then " variadic" else "")
   | Denum { name; base; enumerators } ->
       Printf.sprintf "enum %s %d {%s}" (quote name) base
         (String.concat ", " (List.map (fun (e, v) -> Printf.sprintf "%s %Ld" (quote e) v) enumerators))
@@ -512,6 +535,8 @@ let module_to_string m =
   let buf = Buffer.create 4096 in
   Buffer.add_string buf (Printf.sprintf "triple %s\n" (quote m.triple));
   if not m.strict_aliasing then Buffer.add_string buf "strict_aliasing false\n";
+  Hashtbl.to_seq_keys m.discardable |> List.of_seq |> List.sort String.compare
+  |> List.iter (fun name -> Printf.bprintf buf "discardable %s\n" (symbol name));
   List.iter (fun a -> Buffer.add_string buf (Printf.sprintf "module_asm %s\n" (quote a))) m.module_asm;
   Vec.iteri
     (fun i (file, line, col) ->
@@ -529,6 +554,14 @@ let module_to_string m =
     (fun i (name, parent) ->
       if i > 0 then Buffer.add_string buf (Printf.sprintf "alias_tag %d %s %d\n" i (quote name) parent))
     m.alias_tags;
+  List.iter
+    (fun d ->
+      Option.iter
+        (fun (name, tls) ->
+          Printf.bprintf buf "dglobal %s %d %d %s%s\n" (quote d.vname) d.vty d.vloc
+            (symbol name) (if tls then " tls" else ""))
+        d.vsymbol)
+    (List.rev m.dglobals);
   Vec.iter (print_global buf) m.globals;
   Vec.iter
     (fun a ->
@@ -538,6 +571,13 @@ let module_to_string m =
            (symbol a.target)
            (if a.addend = 0L then "" else " + " ^ Int64.to_string a.addend)))
     m.aliases;
+  Vec.iter
+    (fun (iv : ifunc) ->
+      Buffer.add_string buf
+        (Printf.sprintf "ifunc %s %s%s = %s\n" (symbol iv.iname) (linkage_name iv.ilinkage)
+           (if iv.ivisibility = Default then "" else " " ^ visibility_name iv.ivisibility)
+           (symbol iv.resolver)))
+    m.ifuncs;
   Vec.iter
     (fun f ->
       Buffer.add_char buf '\n';

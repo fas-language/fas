@@ -15,6 +15,8 @@ const DYN_VERSYM u64 = 8
 const DYN_VERNEED u64 = 9
 const DYN_VERDEF u64 = 10
 const DYN_GNU_HASH u64 = 11
+const DYN_GOTPLT u64 = 12
+const DYN_SECTION_COUNT u64 = 13
 
 const HASH_SYSV u8 = 0
 const HASH_GNU u8 = 1
@@ -132,26 +134,33 @@ fn gnu_hash_build(first u64, names addr, total u64, remap addr, out handle[Buf])
         remap[u32, first + n] = trunc[u32](next[u64, b])
         next[u64, b] += 1
     }
+    word_bytes u64 = if config().elf32 { 4 } else { 8 }
+    word_bits u64 = word_bytes * 8
+    shift u64 = if config().has_script { 26 } else { 6 }
     bloom u64 = 1
-    while bloom < umax(1, (count + 7) / 8) { bloom = bloom * 2 }
-    bucket_start u64 = 16 + bloom * 8
+    if config().has_script {
+        while bloom <= count * 12 / word_bits { bloom *= 2 }
+    } else {
+        while bloom < (count + 7) / 8 { bloom *= 2 }
+    }
+    bucket_start u64 = 16 + bloom * word_bytes
     chain_start u64 = bucket_start + buckets * 4
     buf_zeros(out, chain_start + count * 4)
     p addr = out.p
     wr32(p, 0, buckets)
     wr32(p, 4, first)
     wr32(p, 8, bloom)
-    wr32(p, 12, 6)
+    wr32(p, 12, shift)
     for b u64 in 0..buckets {
         wr32(p, bucket_start + b * 4, if counts[u64, b] == 0 { 0 } else { starts[u64, b] })
     }
     for n u64 in 0..count {
         h u64 = hashes[u64, n]
-        word u64 = (h / 64) & (bloom - 1)
-        one u64 = 1
-        mask u64 = (one << (h & 63)) | (one << ((h >> 6) & 63))
-        at u64 = 16 + word * 8
-        wr64(p, at, rd64(p, at) | mask)
+        word u64 = (h / word_bits) & (bloom - 1)
+        mask u64 = (1 << (h % word_bits)) | (1 << ((h >> shift) % word_bits))
+        at u64 = 16 + word * word_bytes
+        if word_bytes == 4 { wr32(p, at, rd32(p, at) | mask) }
+        else { wr64(p, at, rd64(p, at) | mask) }
         index u64 = zext[u64](remap[u32, first + n])
         b u64 = h % buckets
         last u64 = if index + 1 == starts[u64, b] + counts[u64, b] { 1 } else { 0 }
@@ -430,9 +439,22 @@ fn dyn_section(o handle[Obj], data handle[Buf], index u64, name addr, kind u32, 
     buf_zeros(data, size)
 }
 
+fn dyn_script_got() bool {
+    if !config().elf32 { return false }
+    for f u64 in 0..ld.ninput_objects {
+        o handle[Obj] = obj(f)
+        for k u64 in 0..zext[u64](o.nrel) {
+            r handle[Rel] = rel(o, k)
+            if kept(f, zext[u64](r.target)) && (r.kind == 9 || r.kind == 10) { return true }
+        }
+    }
+    return false
+}
+
 fn dyn_prepare() void fails {
     c handle[Config] = config()
     ld.dyn_shared = c.mode == MODE_SHARED
+    script bool = c.has_script && c.shared
     static_pie bool = c.mode == MODE_STATIC_PIE
     ld.dyn_pie = c.pie || ld.dyn_shared
     ld.dyn_static_tls = false
@@ -441,7 +463,7 @@ fn dyn_prepare() void fails {
             if ld.got_model.p[u8, slot] == GM_THREAD { ld.dyn_static_tls = true }
         }
     }
-    try lifecycle_prepare()
+    if !script { try lifecycle_prepare() }
     interp Bytes = if ld.dyn_shared || static_pie { bytes_empty() } else { c.interpreter }
     if (!ld.dyn_shared && !static_pie && interp.n == 0) || interp.n > 4095 || bytes_contains(interp, 0) {
         try die_c(c"dynamic interpreter must be a nonempty path of at most 4095 bytes")
@@ -503,7 +525,7 @@ fn dyn_prepare() void fails {
         if definition(pk_file(x), pk_sec(x), &df, &ds) { map_put(isl, pk(df, ds), trunc[u32](slot)) }
     }
     eh_frame addr = c".eh_frame"
-    for f u64 in 0..ld.nobj {
+    for f u64 in 0..(if script { 0 } else { ld.nobj }) {
         o handle[Obj] = obj(f)
         for k u64 in 0..zext[u64](o.nrel) {
             r handle[Rel] = rel(o, k)
@@ -636,6 +658,7 @@ fn dyn_prepare() void fails {
             if g.has_res == 0 || zext[u64](g.res_file) != f || zext[u64](g.res_sym) != i { continue }
             if ld.sv_alias[u32, zext[u64](id)] != NONE || (g.res_vis != 0 && g.res_vis != 3) { continue }
             if !ld.dyn_shared && !c.export_dynamic && !is_shared_ref(y.name) { continue }
+            if script && f == ld.script_file { try refuse(c"exported script symbol in scripted shared output") }
             if y.section != 0xfff1 {
                 if y.section == 0 || y.section >= 0xff00 { continue }
                 k u64 = zext[u64](y.section)
@@ -751,8 +774,8 @@ fn dyn_prepare() void fails {
     // the metadata object
     file u64 = ld.nobj
     o handle[Obj] = try new_object(c"<dynamic metadata>")
-    o.nsec = 12
-    o.secs = heap_alloc_zeroed(12 * sizeof[Sec])
+    o.nsec = trunc[u32](DYN_SECTION_COUNT)
+    o.secs = heap_alloc_zeroed(DYN_SECTION_COUNT * sizeof[Sec])
     data Buf = {}
     d handle[Buf] = &data
     s0 handle[Sec] = sec(o, 0)
@@ -770,7 +793,9 @@ fn dyn_prepare() void fails {
     buf_append(d, buf_bytes(&ld.ds_buf))
     ds.size = ld.ds_buf.n
     dsy u64 = d.n
-    dyn_section(o, d, DYN_DYNSYM, c".dynsym", 11, 2, 8, 24, symbol_count * 24)
+    word u64 = ls_word()
+    symbol_size u64 = ls_symbol_size()
+    dyn_section(o, d, DYN_DYNSYM, c".dynsym", 11, 2, word, symbol_size, symbol_count * symbol_size)
     for j u64 in 0..ld.dyn_imports.n {
         x handle[DImp] = vec_at(&ld.dyn_imports, j)
         p handle[Imp] = imp(x.key)
@@ -781,7 +806,7 @@ fn dyn_prepare() void fails {
     if c.hash_style == HASH_GNU {
         dyn_section(o, d, DYN_HASH, c".hash", 5, 2, 4, 4, 0)
     } else {
-        buckets u64 = umax(1, (symbol_count - 1) / 4)
+        buckets u64 = if script { symbol_count } else { umax(1, (symbol_count - 1) / 4) }
         at u64 = d.n
         dyn_section(o, d, DYN_HASH, c".hash", 5, 2, 4, 4, 8 + (buckets + symbol_count) * 4)
         wr32(d.p, at, buckets)
@@ -804,7 +829,13 @@ fn dyn_prepare() void fails {
     if ld.dyn_verneed_count != 0 || ld.dyn_verdef_count != 0 { tag_count += 1 }
     if ld.dyn_verneed_count != 0 { tag_count += 2 }
     if ld.dyn_verdef_count != 0 { tag_count += 2 }
-    dyn_section(o, d, DYN_DYNAMIC, c".dynamic", 6, 3, 8, 16, tag_count * 16)
+    if script {
+        tag_count = 6
+        if ld.dyn_has_soname { tag_count += 1 }
+        if c.hash_style == HASH_BOTH { tag_count += 2 } else { tag_count += 1 }
+        if ld.dyn_verdef_count != 0 { tag_count += 3 }
+    }
+    dyn_section(o, d, DYN_DYNAMIC, c".dynamic", 6, 3, word, 2 * word, tag_count * 2 * word)
     dyn_section(o, d, DYN_PLT, c".plt", 1, 6, 16, 16, ld.dyn_stubs.n * 16)
     vs u64 = d.n
     dyn_section(o, d, DYN_VERSYM, c".gnu.version", 0x6fffffff, 2, 2, 2, symbol_count * 2)
@@ -821,23 +852,25 @@ fn dyn_prepare() void fails {
     buf_append(d, buf_bytes(&verneed))
     vns.size = verneed.n
     vds handle[Sec] = sec(o, DYN_VERDEF)
-    dyn_section(o, d, DYN_VERDEF, c".gnu.version_d", 0x6ffffffd, 2, 8, 0, 0)
+    dyn_section(o, d, DYN_VERDEF, c".gnu.version_d", 0x6ffffffd, 2, if script { 4 } else { 8 }, 0, 0)
     buf_append(d, buf_bytes(&verdef))
     vds.size = verdef.n
     gs handle[Sec] = sec(o, DYN_GNU_HASH)
-    dyn_section(o, d, DYN_GNU_HASH, c".gnu.hash", 0x6ffffff6, 2, 8, 0, 0)
+    dyn_section(o, d, DYN_GNU_HASH, c".gnu.hash", 0x6ffffff6, 2, word, 0, 0)
     buf_append(d, buf_bytes(&gnu))
     gs.size = gnu.n
+    got_size u64 = if script && dyn_script_got() { 12 } else { 0 }
+    dyn_section(o, d, DYN_GOTPLT, c".got.plt", 1, 3, 4, 0, got_size)
     o.data = d.p
     o.len = d.n
     o.nsym = 1
     o.syms = heap_alloc_zeroed(sizeof[Sym])
     l handle[Lx] = lx(file)
-    l.discarded = heap_alloc_zeroed(13)
+    l.discarded = heap_alloc_zeroed(DYN_SECTION_COUNT + 1)
     l.gid = heap_alloc_zeroed(4)
     l.gid[u32, 0] = NONE
-    l.kept = heap_alloc_zeroed(13)
-    for k u64 in 1..12 {
+    l.kept = heap_alloc_zeroed(DYN_SECTION_COUNT + 1)
+    for k u64 in 1..DYN_SECTION_COUNT {
         keep bool = true
         if (ld.dyn_shared || static_pie) && k == DYN_INTERP { keep = false }
         if k == DYN_VERSYM && ld.dyn_verneed_count == 0 && ld.dyn_verdef_count == 0 { keep = false }
@@ -845,9 +878,11 @@ fn dyn_prepare() void fails {
         if k == DYN_VERDEF && ld.dyn_verdef_count == 0 { keep = false }
         if k == DYN_HASH && c.hash_style == HASH_GNU { keep = false }
         if k == DYN_GNU_HASH && c.hash_style == HASH_SYSV { keep = false }
+        if k == DYN_GOTPLT && got_size == 0 { keep = false }
+        if script && (k == DYN_PLT || k == DYN_RELA) { keep = false }
         if keep { l.kept[u8, k] = 1 }
     }
-    l.alias = heap_alloc_zeroed(12 * 8 + 8)
+    l.alias = heap_alloc_zeroed(DYN_SECTION_COUNT * 8 + 8)
     l.gotref = heap_alloc_zeroed(4)
     ld.dyn_file = file
     stat_add(ST_DYNAMIC_RELATIVE_RELOCATIONS, ld.dyn_relative_count)
@@ -860,11 +895,16 @@ fn dyn_prepare() void fails {
 
 fn dyn_place(k u64) handle[Place] { return place(ld.dyn_file, k) }
 
+fn dyn_output_number(p handle[Place]) u64 {
+    i u64 = zext[u64](p.output_index)
+    return if config().has_script && p.valid != 0 { ls_sec(i).number } else { i }
+}
+
 // Dynamic.metadata: an output section's (link, info), or false
 fn dyn_metadata(output_index u64, link addr, info addr) bool {
     if ld.dyn_file == NONE64 { return false }
     which u64 = NONE64
-    for k u64 in 1..12 {
+    for k u64 in 1..DYN_SECTION_COUNT {
         p handle[Place] = dyn_place(k)
         if p.valid != 0 && zext[u64](p.output_index) == output_index {
             which = k
@@ -872,12 +912,12 @@ fn dyn_metadata(output_index u64, link addr, info addr) bool {
         }
     }
     if which == NONE64 { return false }
-    dynstr u64 = zext[u64](dyn_place(DYN_DYNSTR).output_index)
+    dynstr u64 = dyn_output_number(dyn_place(DYN_DYNSTR))
     if which == DYN_DYNSYM {
         link[u64] = dynstr
         info[u64] = ld.dyn_bound.n + 1
     } else if which == DYN_HASH || which == DYN_GNU_HASH || which == DYN_RELA || which == DYN_VERSYM {
-        link[u64] = zext[u64](dyn_place(DYN_DYNSYM).output_index)
+        link[u64] = dyn_output_number(dyn_place(DYN_DYNSYM))
         info[u64] = 0
     } else if which == DYN_DYNAMIC || which == DYN_VERNEED || which == DYN_VERDEF {
         link[u64] = dynstr
@@ -953,9 +993,35 @@ fn fx_target(x handle[Fixup], gp u64, ga u64, address addr) u64 {
 }
 
 fn dyn_tag(at u64, tag u64, value u64) u64 {
+    if config().elf32 {
+        wr32(ld.image, at, tag)
+        wr32(ld.image, at + 4, value)
+        return at + 8
+    }
     wr64(ld.image, at, tag)
     wr64(ld.image, at + 8, value)
     return at + 16
+}
+
+// A scripted DSO is mapped as a unit and carries no dynamic fixups.
+fn dyn_emit_script() void {
+    at u64 = dyn_place(DYN_DYNAMIC).offset
+    if ld.dyn_has_soname { at = dyn_tag(at, 14, zext[u64](ld.dyn_soname)) }
+    at = dyn_tag(at, 30, 2)
+    at = dyn_tag(at, 6, dyn_place(DYN_DYNSYM).address)
+    at = dyn_tag(at, 11, ls_symbol_size())
+    at = dyn_tag(at, 5, dyn_place(DYN_DYNSTR).address)
+    at = dyn_tag(at, 10, sec(obj(ld.dyn_file), DYN_DYNSTR).size)
+    if config().hash_style != HASH_SYSV { at = dyn_tag(at, 0x6ffffef5, dyn_place(DYN_GNU_HASH).address) }
+    if config().hash_style != HASH_GNU { at = dyn_tag(at, 4, dyn_place(DYN_HASH).address) }
+    if ld.dyn_verdef_count != 0 {
+        at = dyn_tag(at, 0x6ffffff0, dyn_place(DYN_VERSYM).address)
+        at = dyn_tag(at, 0x6ffffffc, dyn_place(DYN_VERDEF).address)
+        at = dyn_tag(at, 0x6ffffffd, ld.dyn_verdef_count)
+    }
+    if dyn_place(DYN_GOTPLT).valid != 0 {
+        wr32(ld.image, dyn_place(DYN_GOTPLT).offset, dyn_place(DYN_DYNAMIC).address)
+    }
 }
 
 // Dynamic.emit, after relocation
@@ -990,18 +1056,31 @@ fn dyn_emit() void fails {
             value = y.value
         } else {
             p handle[Place] = place(f, zext[u64](y.section))
-            section = zext[u64](p.output_index)
+            section = dyn_output_number(p)
             a u64 = p.address
             if y.kind == 6 { a = a - (ld.lay_base + ld.tls_seg.offset) }
             value = a + y.value
         }
-        at u64 = dynsym.offset + zext[u64](e.index) * 24
+        at u64 = dynsym.offset + zext[u64](e.index) * ls_symbol_size()
         wr32(ld.image, at, zext[u64](e.name))
-        wr8(ld.image, at + 4, (zext[u64](y.binding) << 4) | zext[u64](y.kind))
-        wr8(ld.image, at + 5, zext[u64](e.visibility))
-        wr16(ld.image, at + 6, section)
-        wr64(ld.image, at + 8, value)
-        wr64(ld.image, at + 16, y.size)
+        layout u64 = (zext[u64](y.binding) << 4) | zext[u64](y.kind)
+        if config().elf32 {
+            wr32(ld.image, at + 4, value)
+            wr32(ld.image, at + 8, y.size)
+            wr8(ld.image, at + 12, layout)
+            wr8(ld.image, at + 13, zext[u64](e.visibility))
+            wr16(ld.image, at + 14, section)
+        } else {
+            wr8(ld.image, at + 4, layout)
+            wr8(ld.image, at + 5, zext[u64](e.visibility))
+            wr16(ld.image, at + 6, section)
+            wr64(ld.image, at + 8, value)
+            wr64(ld.image, at + 16, y.size)
+        }
+    }
+    if c.has_script {
+        dyn_emit_script()
+        return
     }
     outs Vec[FxOut] = {}
     gp u64 = 0

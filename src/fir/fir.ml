@@ -22,6 +22,10 @@ type ty =
   | Ptr of int  (** address space *)
   | Vec of int * ty  (** lanes, element (integer, float or pointer) *)
 
+let i386_linux = "i386-unknown-linux-gnu"
+let i386_code16 = "i386-unknown-linux-code16"
+let is_i386 triple = triple = i386_linux || triple = i386_code16
+
 let i1 = Int 1
 let i8 = Int 8
 let i16 = Int 16
@@ -180,6 +184,7 @@ let f_poison_min = 256
    trap exactly where the instruction stands (SPEC §6); Fir_trapdiv turns
    what the target does not trap on by itself into a check and a `trap` *)
 let f_trap = 512
+let f_signaling = 1024  (* fcmp: any NaN raises invalid *)
 let has flags f = flags land f <> 0
 
 (* Memory access attributes. [alias] is 0 for "no information", otherwise an
@@ -245,7 +250,15 @@ let agg_of_complex t =
    the classification of a result tells [Cplx] from [Agg] *)
 let agg_view = function Cplx t -> agg_of_complex t | a -> a
 
-type signature = { param_abis : abi list; result_abis : abi list; variadic : bool }
+type signature = {
+  param_abis : abi list;
+  result_abis : abi list;
+  variadic : bool;
+  ms_abi : bool;
+  ms_xmm_result : bool;
+      (** A Win64 vector or i128 result turned into a 16-byte aggregate
+          by native legalization. The ABI still returns it in XMM0. *)
+}
 type callee = Direct of string | Indirect of value
 
 (* call attributes *)
@@ -360,13 +373,15 @@ type term =
   | Asm_goto of {
       tmpl : string;
       aflags : int;
+      outs : asm_operand array;
       ins : asm_operand array;
-      aargs : value array;  (** one per input *)
+      aargs : value array;  (** outputs that take an arg (indirect / inout), then inputs *)
+      aresults : value array;  (** one per non-indirect output, defined on fall and all label edges *)
       clobbers : string array;
       fall : block;  (** where control goes when the asm falls through *)
-      labels : block array;  (** the blocks the template may jump to: %lN, N = inputs + i *)
+      labels : block array;  (** the blocks the template may jump to: %lN, N = outs + inputs + i *)
     }
-      (** GNU asm goto without outputs; every target block has no
+      (** GNU asm goto (with optional outputs); every target block has no
           parameters *)
   | Ret of value array
   | Unreachable
@@ -406,6 +421,7 @@ let limbs_of_int64 width (x : int64) =
 type def =
   | Result of inst * int
   | Param of block * int
+  | Term_result of block * int  (** result k of a block's terminator (asm_goto outputs) *)
   | Const of const
   | Alias of value  (** replaced: read the target instead *)
   | Unset
@@ -439,6 +455,10 @@ let fa_fenv = 16
    `secret` mark *)
 let fa_secret = 512
 
+(* no branch-target marker (endbr64) at the entry, even when the backend
+   is asked for them (C's nocf_check, the kernel's __noendbr) *)
+let fa_nocf_check = 1024
+
 (* promises about a declared function (SPEC §5 "Declarations"):
    memory(none), memory(read), memory(argmem) (at most one), willreturn *)
 let fa_mem_none = 32
@@ -457,6 +477,9 @@ type dvar = {
   vscope : int;  (** lexical scope id (0 = the function's top level) *)
   vloc : int;  (** declaration location id (0 = none) *)
   varg : int;  (** 1-based parameter number; 0 for a local *)
+  vstack : bool;  (** keep the home in memory for its whole scope *)
+  vindirect : bool;  (** the home holds the address of the variable *)
+  vsymbol : (string * bool) option;  (** static storage symbol and TLS flag *)
   mutable home : value option;
 }
 
@@ -466,6 +489,13 @@ type func = {
   mutable linkage : linkage;
   mutable visibility : visibility;
   mutable fattrs : int;
+  mutable code_section : string option;
+  mutable patchable : (int * int) option;
+      (** patchable(N, M): N nop bytes for run-time patching, M of them
+          before the entry symbol (C's patchable_function_entry); None
+          leaves it to the backend's default *)
+  mutable unwind_cleanup : (block * block) option;
+      (** native cleanup landing pad and the start of its non-catching resume code *)
   mutable defined : bool;  (** false: declaration only *)
   defs : def Vec.t;
   tys : ty Vec.t;
@@ -489,6 +519,14 @@ type init_piece =
   | Blockref of { fn : string; block : int }
       (** 8 bytes: the [blockaddr(@fn, block)] constant, for C's
           [static void *t[] = {&&a, ...}] *)
+  | Blockdiff of { fn : string; lhs : int; rhs : int; width : int }
+      (** The byte offset from [rhs] to [lhs] in the same function. *)
+
+let init_piece_size = function
+  | Bytes s -> String.length s
+  | Zeros n -> n
+  | Reloc { width; _ } | Blockdiff { width; _ } -> width
+  | Blockref _ -> 8
 
 type global = {
   gname : string;
@@ -500,6 +538,7 @@ type global = {
   mutable thread_local : bool;
   mutable size : int;
   mutable init : init_piece list option;  (** None = zero-filled, defined *)
+  mutable gcommon : bool;  (** ELF common storage reserved at link time *)
   mutable gdefined : bool;  (** false: external declaration *)
 }
 
@@ -514,6 +553,15 @@ type alias = {
   mutable avisibility : visibility;
 }
 
+(* A GNU indirect function (STT_GNU_IFUNC): calls and address references to
+   [iname] resolve at load/startup time by invoking [resolver]. *)
+type ifunc = {
+  iname : string;
+  resolver : string;
+  mutable ilinkage : linkage;
+  mutable ivisibility : visibility;
+}
+
 (* Debug types (roadmap v0.8). Id 0 is void; ids index [modul.dtypes]. Ids may
    refer forward (a struct member to a later struct), so recursive types
    need no special form. *)
@@ -523,19 +571,29 @@ type dtype =
   | Dvoid
   | Dbase of { name : string; enc : dencoding; size : int }
   | Dpointer of int  (** pointee (0 = void) *)
-  | Dstruct of { name : string; union : bool; size : int option; members : (string * int * int) list }
+  | Dstruct of { name : string; union : bool; size : int option; members : dmember list }
       (** members: name, type, byte offset; size None = only declared *)
   | Darray of int * int  (** element, count *)
   | Dvector of int * int  (** element, lanes *)
   | Dtypedef of string * int
+  | Dsubroutine of int * int list * bool  (** return, parameters, variadic *)
   | Denum of { name : string; base : int; enumerators : (string * int64) list }
+
+and dmember = {
+  member_name : string;
+  member_type : int;
+  member_offset : int;  (** in bits for a bitfield, in bytes otherwise *)
+  member_bits : int option;
+}
 
 type modul = {
   funcs : func Vec.t;
   globals : global Vec.t;
   aliases : alias Vec.t;
+  ifuncs : ifunc Vec.t;
   locs : (string * int * int) Vec.t;  (** location id -> file, line, column; 0 = none *)
   alias_tags : (string * int) Vec.t;  (** tag name, parent tag (0 = root) *)
+  mutable dglobals : dvar list;
   dtypes : dtype Vec.t;  (** debug type id -> type; 0 = void *)
   scopes : int Vec.t;
       (** lexical scope id -> parent scope (0 = the function's top level, the
@@ -543,6 +601,7 @@ type modul = {
   loc_scopes : (int, int) Hashtbl.t;  (** location id -> its scope, when not 0 *)
   mutable strict_aliasing : bool;
   mutable triple : string;
+  discardable : (string, unit) Hashtbl.t; (** C-local definitions that may be omitted when unreferenced *)
   mutable module_asm : string list;  (** top-level asm text (GNU [asm("...")] outside functions), in order *)
 }
 
@@ -555,23 +614,26 @@ let create_module () =
   let alias_tags = Vec.create ("", 0) in
   ignore (Vec.push alias_tags ("", 0));
   {
-    funcs = Vec.create { name = ""; sig_ = { param_abis = []; result_abis = []; variadic = false };
-                         linkage = Local; visibility = Default; fattrs = 0; defined = false;
+    funcs = Vec.create { name = ""; sig_ = { param_abis = []; result_abis = []; variadic = false; ms_abi = false; ms_xmm_result = false };
+                         linkage = Local; visibility = Default; fattrs = 0; code_section = None; patchable = None; unwind_cleanup = None; defined = false;
                          defs = Vec.create Unset; tys = Vec.create i1; insts = Vec.create dummy_inst;
                          blocks = Vec.create dummy_block; consts = Hashtbl.create 1;
                          names = Hashtbl.create 1; display = None; decl_loc = 0; vars = [] };
     globals =
       Vec.create
         { gname = ""; glinkage = Local; gvisibility = Default; section = None; galign = 1;
-          readonly = false; thread_local = false; size = 0; init = None; gdefined = false };
+          readonly = false; thread_local = false; size = 0; init = None; gcommon = false; gdefined = false };
     aliases = Vec.create { aname = ""; target = ""; addend = 0L; alinkage = Local; avisibility = Default };
+    ifuncs = Vec.create { iname = ""; resolver = ""; ilinkage = Local; ivisibility = Default };
     locs;
     alias_tags;
+    dglobals = [];
     dtypes = (let t = Vec.create Dvoid in ignore (Vec.push t Dvoid); t);
     scopes = (let t = Vec.create 0 in ignore (Vec.push t 0); t);
     loc_scopes = Hashtbl.create 1;
     strict_aliasing = true;
     triple = "x86_64-unknown-linux-gnu";
+    discardable = Hashtbl.create 16;
     module_asm = [];
   }
 
@@ -582,6 +644,9 @@ let new_func ?(linkage = Global) ?(defined = true) name sig_ =
     linkage;
     visibility = Default;
     fattrs = 0;
+    code_section = None;
+    patchable = None;
+    unwind_cleanup = None;
     defined;
     defs = Vec.create ~capacity:64 Unset;
     tys = Vec.create ~capacity:64 i1;
@@ -593,6 +658,17 @@ let new_func ?(linkage = Global) ?(defined = true) name sig_ =
     decl_loc = 0;
     vars = [];
   }
+
+(* A function's symbol and ABI without its definitions, values, or debug locals. *)
+let func_header f =
+  { f with
+    defs = Vec.create ~capacity:1 Unset;
+    tys = Vec.create ~capacity:1 i1;
+    insts = Vec.create ~capacity:1 dummy_inst;
+    blocks = Vec.create ~capacity:1 dummy_block;
+    consts = Hashtbl.create 1;
+    names = Hashtbl.create 1;
+    vars = [] }
 
 let add_func m f = ignore (Vec.push m.funcs f)
 let add_global m g = ignore (Vec.push m.globals g)
@@ -866,7 +942,8 @@ let blocks_pinned (m : modul) (f : func) =
        (fun acc (g : global) ->
          acc
          || match g.init with
-            | Some pieces -> List.exists (function Blockref { fn; _ } -> fn = f.name | _ -> false) pieces
+            | Some pieces ->
+                List.exists (function Blockref { fn; _ } | Blockdiff { fn; _ } -> fn = f.name | _ -> false) pieces
             | None -> false)
        false m.globals
 
@@ -922,7 +999,12 @@ let remove_unreachable_blocks f =
     Array.iteri
       (fun b (br : block_rec) ->
         if seen.(b) then ignore (Vec.push f.blocks br)
-        else Array.iter (fun p -> Vec.set f.defs p Unset) br.params)
+        else begin
+          Array.iter (fun p -> Vec.set f.defs p Unset) br.params;
+          match br.term with
+          | Asm_goto { aresults; _ } -> Array.iter (fun r -> Vec.set f.defs r Unset) aresults
+          | _ -> ()
+        end)
       old;
     let t (x : target) = { x with dest = renum.(x.dest) } in
     Vec.iteri
@@ -934,7 +1016,9 @@ let remove_unreachable_blocks f =
           | Br (c, x, y, w) -> Br (c, t x, t y, w)
           | Switch (v, d, cases, w) -> Switch (v, t d, Array.map (fun (k, x) -> (k, t x)) cases, w)
           | Indirect_br (v, bs) -> Indirect_br (v, Array.map (fun b -> renum.(b)) bs)
-          | Asm_goto a -> Asm_goto { a with fall = renum.(a.fall); labels = Array.map (fun b -> renum.(b)) a.labels }
+          | Asm_goto a ->
+              Array.iteri (fun k r -> Vec.set f.defs r (Term_result (b, k))) a.aresults;
+              Asm_goto { a with fall = renum.(a.fall); labels = Array.map (fun b -> renum.(b)) a.labels }
           | (Ret _ | Unreachable) as term -> term))
       f.blocks;
     true

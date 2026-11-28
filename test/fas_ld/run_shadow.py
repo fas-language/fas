@@ -138,6 +138,10 @@ def main() -> int:
     env["SHADOW_LOG"] = str(log_path)
     env["SHADOW_TMP"] = str(tmp_dir)
     env["SHADOW_NORM"] = str(norm_stderr)
+    if env.get("FAS_REFCACHE") != "off":
+        refcache = root / "tools/refcache"
+        env["SHADOW_REFCACHE"] = str(refcache)
+        env["PATH"] = str(refcache / "shadow-bin") + os.pathsep + env["PATH"]
     env.setdefault("FAS_CC", "clang-22")
     env.setdefault("CC", "clang-22")
     env.setdefault("FAS_OPT", "opt-22")
@@ -145,10 +149,14 @@ def main() -> int:
     env.setdefault("LLVM_OPT", "opt-22")
     env.setdefault("LLVM_LLC", "llc-22")
 
+    # SHADOW_SUITES="a.py b.py" reruns only those suites (e.g. after a timeout).
+    only = set(os.environ.get("SHADOW_SUITES", "").split())
     failed_suites = []
     for raw_cmd in commands:
         cmd = [resolve_arg(a, test_src, test_build, shadow_ld) for a in raw_cmd]
         name = Path(cmd[1]).name if len(cmd) > 1 else "test"
+        if only and name not in only:
+            continue
         with open(log_path, "a") as lf:
             lf.write(f"== {name}\n")
         out_file = workdir / f"out.{name}"
@@ -169,7 +177,7 @@ def main() -> int:
                     break
 
     print(
-        f"shadow: suites={len(commands)} failed_suites={len(failed_suites)} "
+        f"shadow: suites={len(only) if only else len(commands)} failed_suites={len(failed_suites)} "
         f"SAME={counts['SAME']} DIFF={counts['DIFF']} BYTES={counts['BYTES']} REFUSED={counts['REFUSED']}"
     )
     for name, rc, out_file in failed_suites:

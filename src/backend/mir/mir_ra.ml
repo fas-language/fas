@@ -92,36 +92,31 @@ let gpr_scratch = X64.[ R13; R14; R15 ]
 let xmm_scratch = [ 14; 15 ]
 let is_phys = function V _ -> false | _ -> true
 
-module RS = Set.Make (struct
-  type t = reg
-
-  let compare = compare
-end)
-
-let phys_set l = RS.of_list (List.filter is_phys l)
-
-(* the physical registers live before each instruction of a block, and
-   after its last one; nothing physical is live across a block boundary
-   except what the terminator reads *)
-let phys_liveness (b : block) =
-  let code = Array.of_list b.code in
-  let n = Array.length code in
-  let live = Array.make (n + 1) RS.empty in
-  live.(n) <- phys_set (term_uses b.term);
-  for i = n - 1 downto 0 do
-    let u, d = uses_defs code.(i) in
-    let killed = RS.union (phys_set d) (phys_set (clobbers code.(i))) in
-    live.(i) <- RS.union (RS.diff live.(i + 1) killed) (phys_set u)
-  done;
-  (code, live)
-
-(* physical registers as 0..31 (0..15 general, 16..31 xmm) *)
+(* A physical-register set fits in one OCaml integer on x86-64.
+   Bits 0..15 denote GPRs and bits 16..31 denote XMM registers. *)
 let nphys = 32
 
 let pidx = function
   | G r -> X64.reg_num r
   | X i -> 16 + i
   | V _ -> invalid_arg "Mir_ra.pidx"
+
+let phys_bit r = 1 lsl pidx r
+let phys_set regs =
+  List.fold_left (fun set r -> if is_phys r then set lor phys_bit r else set) 0 regs
+
+(* The set live before each instruction and after the last one.
+   At the end of the block only the terminator's registers are live. *)
+let phys_liveness code term =
+  let n = Array.length code in
+  let live = Array.make (n + 1) 0 in
+  live.(n) <- phys_set (term_uses term);
+  for i = n - 1 downto 0 do
+    let u, d = uses_defs code.(i) in
+    let killed = phys_set d lor phys_set (clobbers code.(i)) in
+    live.(i) <- (live.(i + 1) land lnot killed) lor phys_set u
+  done;
+  live
 
 let vregs l = List.sort_uniq compare (List.filter_map (function V v -> Some v | _ -> None) l)
 
@@ -144,15 +139,22 @@ let run (f : func) =
   let bterm bi = bstart.(bi) + Array.length codes.(bi) in
   (* 3. blocked positions of each physical register, in increasing order *)
   let blocked = Array.init nphys (fun _ -> Dynarray.create ()) in
+  let block_regs position mask =
+    if mask <> 0 then
+      for i = 0 to nphys - 1 do
+        if mask land (1 lsl i) <> 0 then Dynarray.add_last blocked.(i) position
+      done
+  in
   for bi = 0 to nb - 1 do
-    let code, live = phys_liveness (Dynarray.get f.blocks bi) in
+    let code = codes.(bi) and term = (Dynarray.get f.blocks bi).term in
+    let live = phys_liveness code term in
     Array.iteri
       (fun i ins ->
         let u, d = uses_defs ins in
-        let s = RS.union (phys_set (u @ d @ clobbers ins)) (RS.union live.(i) live.(i + 1)) in
-        RS.iter (fun r -> Dynarray.add_last blocked.(pidx r) (bstart.(bi) + i)) s)
+        let mask = phys_set u lor phys_set d lor phys_set (clobbers ins) lor live.(i) lor live.(i + 1) in
+        block_regs (bstart.(bi) + i) mask)
       code;
-    RS.iter (fun r -> Dynarray.add_last blocked.(pidx r) (bterm bi)) live.(Array.length code);
+    block_regs (bterm bi) live.(Array.length code);
     List.iter (function V _ -> raise (Failure "virtual register in a terminator") | _ -> ()) (term_uses (Dynarray.get f.blocks bi).term)
   done;
   (* is r blocked somewhere in [lo, hi]? *)
@@ -172,7 +174,9 @@ let run (f : func) =
     if p < lo.(v) then lo.(v) <- p;
     if p > hi.(v) then hi.(v) <- p
   in
-  let ue = Array.make nv [] and defb = Array.make nv [] in
+  (* The last definition's block is already in [dstamp]. Keep a list
+     only for values defined in more than one block. *)
+  let ue = Array.make nv [] and older_def_blocks = Array.make nv [] in
   let dstamp = Array.make nv (-1) and ustamp = Array.make nv (-1) in
   for bi = 0 to nb - 1 do
     Array.iteri
@@ -190,8 +194,9 @@ let run (f : func) =
           (fun v ->
             extend v (bstart.(bi) + i);
             if dstamp.(v) <> bi then begin
-              dstamp.(v) <- bi;
-              defb.(v) <- bi :: defb.(v)
+              let previous = dstamp.(v) in
+              if previous >= 0 then older_def_blocks.(v) <- previous :: older_def_blocks.(v);
+              dstamp.(v) <- bi
             end)
           (vregs d))
       codes.(bi)
@@ -203,7 +208,8 @@ let run (f : func) =
   let defmark = Array.make nb (-1) and livein = Array.make nb (-1) in
   for v = 0 to nv - 1 do
     if ue.(v) <> [] then begin
-      List.iter (fun b -> defmark.(b) <- v) defb.(v);
+      if dstamp.(v) >= 0 then defmark.(dstamp.(v)) <- v;
+      List.iter (fun b -> defmark.(b) <- v) older_def_blocks.(v);
       let stack = ref ue.(v) in
       List.iter (fun b -> livein.(b) <- v) ue.(v);
       while !stack <> [] do
@@ -223,11 +229,17 @@ let run (f : func) =
   done;
   (* 4. linear scan *)
   let order =
-    let l = ref [] in
-    for v = nv - 1 downto 0 do
-      if hi.(v) >= 0 then l := v :: !l
+    let count = Array.fold_left (fun n e -> if e >= 0 then n + 1 else n) 0 hi in
+    let order = Array.make count 0 in
+    let i = ref 0 in
+    for v = 0 to nv - 1 do
+      if hi.(v) >= 0 then begin
+        order.(!i) <- v;
+        incr i
+      end
     done;
-    List.stable_sort (fun a b -> compare lo.(a) lo.(b)) !l
+    Array.stable_sort (fun a b -> compare lo.(a) lo.(b)) order;
+    order
   in
   (* a function that handles secrets uses no callee-saved register: a
      callee would push one holding a secret below this function's frame,
@@ -244,7 +256,7 @@ let run (f : func) =
     let assign = Array.make nv None in
     let hold_end = Array.make nphys (-1) and hold_v = Array.make nphys (-1) in
     let spilled = ref false in
-    List.iter
+    Array.iter
       (fun v ->
         let s = lo.(v) and e = hi.(v) in
         let pool = match Dynarray.get f.vcls v with Gpr -> gp | Xmm -> xp in
@@ -289,7 +301,7 @@ let run (f : func) =
     if vslot.(v) < 0 then vslot.(v) <- (if wide.(v) then new_slot f ~size:16 ~align:16 else new_slot f ~size:8 ~align:8);
     vslot.(v)
   in
-  let saved = ref [] in
+  let saved = ref (if f.ms_abi then X64.[ Rsi; Rdi ] else []) in
   let note_saved = function
     | G r when List.mem r callee_saved && not (List.mem r !saved) -> saved := r :: !saved
     | _ -> ()
@@ -306,7 +318,7 @@ let run (f : func) =
     let pool = match cls with Gpr -> List.map (fun r -> G r) gpr_all | Xmm -> List.map (fun i -> X i) xmm_pool in
     List.find_opt
       (fun r ->
-        (not (RS.mem r avoid))
+        (avoid land phys_bit r = 0)
         && (not (is_blocked (pidx r) p p))
         &&
         let held = ref false in
@@ -318,15 +330,15 @@ let run (f : func) =
     let b = Dynarray.get f.blocks bi in
     let out = ref [] in
     let push x = out := x :: !out in
-    let _, plive = phys_liveness b in
+    let plive = phys_liveness codes.(bi) b.term in
     Array.iteri
       (fun i ins ->
         let u, d = uses_defs ins in
         let p = bstart.(bi) + i in
         let scratch = Hashtbl.create 4 in
         (* physical registers this instruction names or that live across it *)
-        let taken = ref (RS.union (phys_set (u @ d @ clobbers ins)) (RS.union plive.(i) plive.(i + 1))) in
-        let ok r = not (RS.mem r !taken) in
+        let taken = ref (phys_set u lor phys_set d lor phys_set (clobbers ins) lor plive.(i) lor plive.(i + 1)) in
+        let ok r = !taken land phys_bit r = 0 in
         let gs = ref (List.filter ok (List.map (fun r -> G r) gpr_scratch))
         and xs = ref (List.filter ok (List.map (fun i -> X i) xmm_scratch)) in
         let g = function
@@ -349,7 +361,7 @@ let run (f : func) =
                           | Some r -> Hashtbl.add scratch v r
                           | None ->
                               raise (Failure (Printf.sprintf "%s: out of scratch registers at %s" f.name (ins_s ins)))));
-                      taken := RS.add (Hashtbl.find scratch v) !taken;
+                      taken := !taken lor phys_bit (Hashtbl.find scratch v);
                       Hashtbl.find scratch v))
           | r -> r
         in

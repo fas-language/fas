@@ -374,12 +374,13 @@ class ArchiveTests(unittest.TestCase):
         out = self.link('repeated-read-muldefs', self.simple, library, library,
                         options=('--whole-archive', '-z', 'muldefs'))
         run(out, expected=42)
-        # Reusing bytes cannot bypass the 256 MiB logical input budget.
+        # Reusing bytes cannot bypass the 8 GiB logical input budget: one
+        # 64 MiB file read once, named 129 times.
         padded = self.root/'repeated-read-padded.o'
         padded.write_bytes(self.answer.read_bytes())
         with padded.open('r+b') as stream:
-            stream.truncate(32*1024*1024)
-        self.rejected(padded, 'remaining input budget', *([padded]*8))
+            stream.truncate(64*1024*1024)
+        self.rejected(padded, 'remaining input budget', *([padded]*128))
 
 
 if __name__ == "__main__":

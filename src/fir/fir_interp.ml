@@ -534,6 +534,7 @@ type finfo = {
 
 type sym =
   | Fn of finfo
+  | Ifunc of { imi : int; resolver : string; addr : int64; mutable resolved : finfo option }
   | Ext_fn of string * int64
   | Obj of obj
   | Part of obj * int  (** a global inside a section object, at this offset *)
@@ -791,6 +792,7 @@ let lookup st mi name =
 let sym_addr = function
   | Fn fi -> fi.faddr
   | Ext_fn (_, a) | Ext_gl (_, a) | Addr a -> a
+  | Ifunc r -> r.addr
   | Obj o -> o.base
   | Part (o, off) -> Int64.add o.base (Int64.of_int off)
 
@@ -961,7 +963,16 @@ let create cfg (ms : modul list) =
               | s -> Addr (Int64.add (sym_addr s) a.addend)
             in
             define mi a.alinkage a.aname s)
-        m.aliases)
+        m.aliases;
+      Vec.iter
+        (fun (iv : ifunc) ->
+          if iv.iname <> "" then begin
+            let addr = fresh_fn_addr () in
+            let s = Ifunc { imi = mi; resolver = iv.resolver; addr; resolved = None } in
+            Hashtbl.replace st.by_addr addr s;
+            define mi iv.ilinkage iv.iname s
+          end)
+        m.ifuncs)
     st.modules;
   (* initializers, now that every address is known *)
   Array.iteri
@@ -1000,7 +1011,9 @@ let create cfg (ms : modul list) =
                               Int64.add (sym_addr s) (Int64.of_int (!pos - start))
                             in
                             put_addr (if pcrel then Int64.sub a here else a) width
-                        | Blockref { fn; block } -> put_addr (blockaddr st fn block) 8)
+                        | Blockref { fn; block } -> put_addr (blockaddr st fn block) 8
+                        | Blockdiff { fn; lhs; rhs; width } ->
+                            put_addr (Int64.sub (blockaddr st fn lhs) (blockaddr st fn rhs)) width)
                       pieces)
             | _ -> ())
         m.globals)
@@ -1375,6 +1388,8 @@ let sig_matches (a : signature) (b : signature) =
   && List.length a.result_abis = List.length b.result_abis
   && List.for_all2 same a.result_abis b.result_abis
   && a.variadic = b.variadic
+  && a.ms_abi = b.ms_abi
+  && a.ms_xmm_result = b.ms_xmm_result
 
 let tick st =
   st.steps <- st.steps + 1;
@@ -1419,7 +1434,8 @@ let rec call st (caller : frame option) (target : sym) (sig_ : signature)
           varargs = 0L;
         }
       in
-      (* the variadic arguments, laid out as SysV's overflow area *)
+      (* Lay out unnamed arguments as a SysV overflow area or an MS
+         array of eight-byte slots. An MS slot can point to a private copy. *)
       let varargs =
         if Array.length args <= fixed then 0L
         else begin
@@ -1435,10 +1451,11 @@ let rec call st (caller : frame option) (target : sym) (sig_ : signature)
                  args)
             |> List.filter_map Fun.id
           in
+          let slot = if sig_.ms_abi then fun _ -> (8, 8) else vararg_slot in
           let size =
             List.fold_left
               (fun pos (s, _) ->
-                let n, a = vararg_slot s in
+                let n, a = slot s in
                 ((pos + a - 1) / a * a) + n)
               0 items
           in
@@ -1446,12 +1463,24 @@ let rec call st (caller : frame option) (target : sym) (sig_ : signature)
           ignore
             (List.fold_left
                (fun pos (s, x) ->
-                 let n, a = vararg_slot s in
+                 let n, a = slot s in
                  let pos = (pos + a - 1) / a * a in
                  let at = Int64.add o.base (Int64.of_int pos) in
-                 (match s with
-                 | `Agg (size, _) -> write_raw st at (read_raw st (ptr_of x.(0)) size)
-                 | `Ty t -> write_value st t at x);
+                 let bytes, align, write =
+                   match s with
+                   | `Agg (size, align) ->
+                       (size, align, fun dst -> write_raw st dst (read_raw st (ptr_of x.(0)) size))
+                   | `Ty (Vec _ as t) when sig_.ms_abi ->
+                       let size = Fir_abi.vec_abi_size t in
+                       (size, size, fun dst -> write_value st t dst x)
+                   | `Ty t -> (size_of t, 16, fun dst -> write_value st t dst x)
+                 in
+                 let vector = match s with `Ty (Vec _) -> true | _ -> false in
+                 if sig_.ms_abi && (vector || not (Fir_abi.ms_reg_size bytes)) then begin
+                   let arg = new_alloca st fr0 ~size:(max 1 bytes) ~align:(max 16 align) ~what:"variadic argument copy" in
+                   write arg.base;
+                   write_value st ptr at [| Bits [| arg.base |] |]
+                 end else write at;
                  pos + n)
                0 items);
           o.base
@@ -1480,6 +1509,33 @@ let rec call st (caller : frame option) (target : sym) (sig_ : signature)
       List.iter (free_obj st) fr.allocas;
       st.depth <- st.depth - 1;
       results
+  | Ifunc r ->
+      let fi =
+        match r.resolved with
+        | Some fi -> fi
+        | None -> (
+            match lookup st r.imi r.resolver with
+            | Fn rfi as rs -> (
+                let rargs =
+                  match rfi.fn.sig_.param_abis with
+                  | [] -> [||]
+                  | [ _ ] -> [| [| Bits [| 0L |] |] |]
+                  | [ _; _ ] -> [| [| Bits [| 0L |] |]; [| Bits [| 0L |] |] |]
+                  | _ -> error "ifunc resolver @%s has unsupported parameter count" r.resolver
+                in
+                let res = call st caller rs rfi.fn.sig_ rargs [] in
+                let target_addr =
+                  if Array.length res = 1 && Array.length res.(0) = 1 then ptr_of res.(0).(0)
+                  else error "ifunc resolver @%s did not return a pointer" r.resolver
+                in
+                match Hashtbl.find_opt st.by_addr target_addr with
+                | Some (Fn fi) ->
+                    r.resolved <- Some fi;
+                    fi
+                | _ -> error "ifunc resolver @%s returned non-function address 0x%Lx" r.resolver target_addr)
+            | _ -> error "ifunc resolver @%s has no body" r.resolver)
+      in
+      call st caller (Fn fi) sig_ args va_aggs
   | Ext_fn (name, _) -> st.cfg.extern_call st name sig_ args
   | Ext_gl (name, _) -> error "calls the address of the global @%s" name
   | Obj o | Part (o, _) -> error "calls the address of %s" o.what
@@ -1996,11 +2052,14 @@ and exec st fr i =
       if fr.varargs = 0L && not fr.fi.fn.sig_.variadic then
         error "va_start in a function that is not variadic";
       let a = ptr_of (get1 st fr p) in
-      let w32 x = [| Bits [| Int64.of_int x |] |] in
-      write_value st i32 a (w32 48);
-      write_value st i32 (Int64.add a 4L) (w32 176);
-      write_value st ptr (Int64.add a 8L) [| Bits [| fr.varargs |] |];
-      write_value st ptr (Int64.add a 16L) [| Bits [| 0L |] |]
+      if fr.fi.fn.sig_.ms_abi then write_value st ptr a [| Bits [| fr.varargs |] |]
+      else begin
+        let w32 x = [| Bits [| Int64.of_int x |] |] in
+        write_value st i32 a (w32 48);
+        write_value st i32 (Int64.add a 4L) (w32 176);
+        write_value st ptr (Int64.add a 8L) [| Bits [| fr.varargs |] |];
+        write_value st ptr (Int64.add a 16L) [| Bits [| 0L |] |]
+      end
   | Va_arg p ->
       let t = rty 0 in
       let at = va_next st (ptr_of (get1 st fr p)) (`Ty t) in
@@ -2063,6 +2122,7 @@ let run_call st (target : sym) (sig_ : signature) (args : v array) =
 let run_function st ?(mi = 0) name (args : v array) =
   match lookup st mi name with
   | Fn fi as s -> run_call st s fi.fn.sig_ args
+  | Ifunc _ as s -> run_call st s { param_abis = []; result_abis = []; variadic = false; ms_abi = false; ms_xmm_result = false } args
   | _ -> error "@%s has no body" name
 
 let int_arg w x = [| Bits (W.of_int64 w x) |]

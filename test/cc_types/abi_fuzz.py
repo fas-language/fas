@@ -9,11 +9,16 @@ For each signature:
 Verifies every single argument and return value round-trips identically!
 """
 import os
+from pathlib import Path
 import random
 import subprocess
 import sys
 import tempfile
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools/refcache"))
+from refcache import digest, run as cached_run
+
+GENERATOR = digest(Path(__file__).read_bytes())
 CC = os.environ.get("FAS_CC", "clang-22")
 CASES = int(os.environ.get("FAS_CC_TYPES_ABI_CASES", os.environ.get("FAS_CC_TYPES_CASES", "1000")))
 SEED = int(os.environ.get("SEED", "54321"))
@@ -496,7 +501,9 @@ def run_batch(probe_bin: str, fas_fir_bin: str, rng: random.Random, batch_id: in
         if r1.returncode != 0:
             print(f"FAIL batch {batch_id}: fas-fir failed:\n{r1.stderr}", file=sys.stderr)
             sys.exit(1)
-        r2 = subprocess.run([CC, "-std=gnu23", "-O0", "-w", "-c", c_path, "-o", c_o], capture_output=True, text=True)
+        r2 = cached_run([CC, "-std=gnu23", "-O0", "-w", "-c", c_path, "-o", c_o],
+                        ns=f"cc-types/abi/{GENERATOR}/{SEED}/{batch_id}", deps=[c_path],
+                        outs=[c_o], scratch=d, c=True, text=True)
         if r2.returncode != 0:
             print(f"FAIL batch {batch_id}: clang-22 failed:\n{r2.stderr}", file=sys.stderr)
             sys.exit(1)

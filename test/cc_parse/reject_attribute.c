@@ -1,0 +1,1 @@
+[[nodiscard()]] int function(void);

@@ -16,6 +16,10 @@ use "../../lib/core.fas"
 use "../../lib/os.fas"
 use "../../lib/buf.fas"
 use "../../lib/bytes.fas"
+use "../../lib/table.fas"
+use "../token.fas"
+use "../sym.fas"
+use "../kw.fas"
 use "../types.fas"
 use "../layout.fas"
 use "../abi.fas"
@@ -276,7 +280,9 @@ fn emit_fn_pair(st handle[AbiProbe], id u64, ret_tid u32, is_var bool,
 
 fn main() i32 {
     ctx TypeCtx = {}
-    tc_init(&ctx)
+    syms SymTable = {}
+    sym_init(&syms)
+    tc_init(&ctx, &syms)
     defer { tc_free(&ctx) }
 
     st AbiProbe = {}
@@ -343,6 +349,7 @@ fn main() i32 {
 
                 ftid u32 = parse_ty(&st, ty_tok)
                 fd handle[FieldDef] = vec_add(&fields)
+                fd.name_id = if is_bf && bw == 0 { 0 } else { i + 1 }
                 fd.ty = ftid
                 fd.bit_width = bw
                 fd.align_attr = f_al

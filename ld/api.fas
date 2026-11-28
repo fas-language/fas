@@ -231,7 +231,7 @@ fn ld_add_input(s handle[LdSession], name Bytes, data Bytes) void {
     o.path = nul_dup(name.p, name.n)
     o.data = data.p
     o.len = data.n
-    elf_parse(o) catch err {
+    elf_parse(o, false) catch err {
         pre.status = if err == Refused { 2 } else { 1 }
     }
     vec_push(&s.pre_objs, p)
@@ -241,7 +241,7 @@ fn ld_add_input(s handle[LdSession], name Bytes, data Bytes) void {
 // Consumes a pre-parsed object if `path` was added via `ld_add_input`.
 fn ld_take_preparsed(path Bytes, dst_obj handle[Obj], dst_lx handle[Lx]) bool {
     s handle[LdSession] = ld.ld_api_session
-    if s == null { return false }
+    if s == null || config().has_script { return false }
     p addr = map_get(&s.pre_map, path) catch null
     if p == null { return false }
     map_remove(&s.pre_map, path)

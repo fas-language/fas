@@ -13,7 +13,9 @@ struct MacroParam {
     name Bytes
     def_val Bytes
     has_default bool
-    pad arr[7, u8]
+    required bool
+    vararg bool
+    pad arr[5, u8]
 }
 
 struct MacroDef {
@@ -45,51 +47,153 @@ fn pop_source_frame() bool {
     return true
 }
 
-// Reads raw lines until the matching end directive (handling nested blocks).
-// `open_kind`: 0 = .macro/.endm, 1 = .rept/.irp/.irpc/.endr
-fn capture_block_body(open_kind u8) Bytes fails {
-    body Buf = {}
-    depth u32 = 1
+// Advance to the next statement without interpreting the current one.
+fn advance_statement() void {
     p addr = ac.src.p
     n u64 = ac.src.n
+    quoted bool = false
     while ac.pos < n {
-        line_start u64 = ac.pos
-        while ac.pos < n && p[u8, ac.pos] != 10 { ac.pos += 1 }
-        line_end u64 = ac.pos
-        if ac.pos < n && p[u8, ac.pos] == 10 { ac.pos += 1; ac.line += 1 }
-
-        // Check first directive token on this line
-        i u64 = line_start
-        while i < line_end && is_hspace(p[u8, i]) { i += 1 }
-        if i < line_end && p[u8, i] == 46 {
-            j u64 = i
-            while j < line_end && is_ident_char(p[u8, j]) { j += 1 }
-            d Bytes = bytes(p + i, j - i)
-            if open_kind == 0 {
-                if bytes_is(d, c".macro") { depth += 1 }
-                else if bytes_is(d, c".endm") {
-                    depth -= 1
-                    if depth == 0 {
-                        iid u32 = intern(&ac.names, buf_bytes(&body))
-                        return intern_name(&ac.names, iid)
-                    }
-                }
-            } else {
-                if bytes_is(d, c".rept") || bytes_is(d, c".irp") || bytes_is(d, c".irpc") { depth += 1 }
-                else if bytes_is(d, c".endr") {
-                    depth -= 1
-                    if depth == 0 {
-                        iid u32 = intern(&ac.names, buf_bytes(&body))
-                        return intern_name(&ac.names, iid)
-                    }
-                }
-            }
+        c u8 = p[u8, ac.pos]
+        ac.pos += 1
+        if c == 10 { ac.line += 1; return }
+        if quoted {
+            if c == 34 { quoted = false }
+            else if c == 92 && ac.pos < n && p[u8, ac.pos] != 10 { ac.pos += 1 }
+            continue
         }
-        buf_append(&body, bytes(p + line_start, line_end - line_start))
-        buf_u8(&body, 10)
+        if c == 34 { quoted = true }
+        else if c == 59 { return }
+        else if c == 35 || (c == 47 && ac.pos < n && p[u8, ac.pos] == 47) {
+            while ac.pos < n && p[u8, ac.pos] != 10 { ac.pos += 1 }
+        } else if c == 47 && ac.pos < n && p[u8, ac.pos] == 42 {
+            ac.pos -= 1
+            skip_hspace()
+        } else if c == 39 && ac.pos < n && p[u8, ac.pos] != 10 {
+            if p[u8, ac.pos] == 92 && ac.pos + 1 < n && p[u8, ac.pos + 1] != 10 { ac.pos += 1 }
+            ac.pos += 1
+            if ac.pos < n && p[u8, ac.pos] == 39 { ac.pos += 1 }
+        }
+    }
+}
+
+fn statement_directive() Bytes {
+    skip_hspace()
+    start u64 = ac.pos
+    p addr = ac.src.p
+    if start >= ac.src.n || p[u8, start] != 46 { return bytes_empty() }
+    while ac.pos < ac.src.n && is_ident_char(p[u8, ac.pos]) { ac.pos += 1 }
+    return bytes(p + start, ac.pos - start)
+}
+
+// Captures statements until the matching end directive, handling nesting.
+// `open_kind`: 0 = .macro/.endm, 1 = .rept/.irp/.irpc/.endr
+fn capture_block_body(open_kind u8) Bytes fails {
+    start u64 = ac.pos
+    depth u32 = 1
+    p addr = ac.src.p
+    while ac.pos < ac.src.n {
+        stmt u64 = ac.pos
+        d Bytes = statement_directive()
+        if open_kind == 0 {
+            if bytes_is(d, c".macro") { depth += 1 }
+            else if bytes_is(d, c".endm") || bytes_is(d, c".endmacro") { depth -= 1 }
+        } else {
+            if bytes_is(d, c".rept") || bytes_is(d, c".irp") || bytes_is(d, c".irpc") { depth += 1 }
+            else if bytes_is(d, c".endr") { depth -= 1 }
+        }
+        advance_statement()
+        if depth == 0 { return bytes(p + start, stmt - start) }
     }
     try as_err(if open_kind == 0 { c"unterminated .macro (missing .endm)" } else { c"unterminated .rept/.irp/.irpc (missing .endr)" })
     return bytes_empty()
+}
+
+fn macro_operator(c u8) bool {
+    return c == 43 || c == 45 || c == 42 || c == 47 || c == 37 || c == 38 ||
+           c == 124 || c == 94 || c == 60 || c == 62 || c == 61 || c == 33 || c == 126
+}
+
+// Commas and whitespace separate arguments outside strings and parentheses.
+// Whitespace around an expression operator is part of the argument.
+fn macro_argument(rest bool, split_space bool) Bytes {
+    skip_hspace()
+    p addr = ac.src.p
+    n u64 = ac.src.n
+    start u64 = ac.pos
+    end u64 = start
+    depth u32 = 0
+    quoted bool = false
+    while ac.pos < n {
+        c u8 = p[u8, ac.pos]
+        if c == 10 { break }
+        if quoted {
+            if c == 92 && ac.pos + 1 < n && p[u8, ac.pos + 1] != 10 { ac.pos += 1 }
+            else if c == 34 { quoted = false }
+        } else if c == 34 { quoted = true }
+        else if depth == 0 && (c == 59 || c == 35 || (!rest && c == 44)) { break }
+        else if c == 40 { depth += 1 }
+        else if c == 41 && depth > 0 { depth -= 1 }
+        else if depth == 0 && !rest && split_space && is_hspace(c) {
+            skip_hspace()
+            if ac.pos >= n { break }
+            left bool = end > start && macro_operator(p[u8, end - 1])
+            next u8 = p[u8, ac.pos]
+            // A '%' followed by a name starts a register, not an operator.
+            right bool = macro_operator(next) && !(next == 37 && ac.pos + 1 < n && is_ident_start(p[u8, ac.pos + 1]))
+            if !left && !right { break }
+            continue
+        }
+        ac.pos += 1
+        if quoted || !is_hspace(c) { end = ac.pos }
+    }
+    return bytes(p + start, end - start)
+}
+
+fn macro_unquote(value Bytes) Bytes {
+    if value.n >= 2 && value.p[u8] == 34 && value.p[u8, value.n - 1] == 34 {
+        return bytes(value.p + 1, value.n - 2)
+    }
+    return value
+}
+
+fn invocation_argument(rest bool) Bytes fails {
+    skip_hspace()
+    if ac.altmacro && !rest && !at_eol() {
+        p addr = ac.src.p
+        start u64 = ac.pos
+        if p[u8, start] == 37 { // %expr: substitute the decimal value
+            ac.pos += 1
+            value i64 = try eval_const_now(try parse_expr())
+            text Buf = {}
+            buf_dec_i64(&text, value)
+            return buf_bytes(&text)
+        }
+        if p[u8, start] == 60 { // <text>: '!' quotes the following character
+            ac.pos += 1
+            while ac.pos < ac.src.n && p[u8, ac.pos] != 10 {
+                ch u8 = p[u8, ac.pos]
+                ac.pos += 1
+                if ch == 62 { return bytes(p + start, ac.pos - start) }
+                if ch == 33 && ac.pos < ac.src.n && p[u8, ac.pos] != 10 { ac.pos += 1 }
+            }
+            try as_err(c"unterminated .altmacro argument")
+        }
+    }
+    return macro_argument(rest, true)
+}
+
+fn invocation_unquote(value Bytes) Bytes {
+    if ac.altmacro && value.n >= 2 && value.p[u8] == 60 && value.p[u8, value.n - 1] == 62 {
+        text Buf = {}
+        i u64 = 1
+        while i < value.n - 1 {
+            if value.p[u8, i] == 33 && i + 1 < value.n - 1 { i += 1 }
+            buf_u8(&text, value.p[u8, i])
+            i += 1
+        }
+        return buf_bytes(&text)
+    }
+    return macro_unquote(value)
 }
 
 fn parse_macro_def() void fails {
@@ -111,27 +215,24 @@ fn parse_macro_def() void fails {
         skip_hspace()
         if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 58 { // optional :req / :vararg
             ac.pos += 1
-            try parse_ident()
+            qualifier Bytes = try parse_ident()
+            if bytes_is(qualifier, c"req") { mp.required = true }
+            else if bytes_is(qualifier, c"vararg") { mp.vararg = true }
+            else { try as_err_b(c"unknown macro parameter qualifier: ", qualifier) }
             skip_hspace()
         }
         if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 61 { // =default
             ac.pos += 1
-            skip_hspace()
-            dstart u64 = ac.pos
-            while ac.pos < ac.src.n {
-                c u8 = ac.src.p[u8, ac.pos]
-                if c == 44 || c == 10 || c == 59 || c == 35 || is_hspace(c) { break }
-                ac.pos += 1
-            }
-            diid u32 = intern(&ac.names, bytes(ac.src.p + dstart, ac.pos - dstart))
+            def_val Bytes = macro_argument(false, true)
+            diid u32 = intern(&ac.names, def_val)
             mp.def_val = intern_name(&ac.names, diid)
             mp.has_default = true
         }
         skip_hspace()
         if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 44 { ac.pos += 1 }
+        if mp.vararg && !at_eol() { try as_err(c"variadic parameter must be last") }
     }
-    skip_to_eol()
-    if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 10 { ac.pos += 1; ac.line += 1 }
+    advance_statement()
     m.body = try capture_block_body(0)
     map_put(&ac.macro_map, m.name, mid)
 }
@@ -180,33 +281,34 @@ fn try_invoke_macro(name Bytes) bool fails {
     if mid == AS_NONE { return false }
     m handle[MacroDef] = vec_at(&ac.macros, zext[u64](mid))
 
-    // Parse comma-separated raw argument strings up to EOL
     args Vec[Bytes] = {}
+    for k u64 in 0..m.params.n { vec_push(&args, bytes_empty()) }
     p addr = ac.src.p
     n u64 = ac.src.n
+    position u64 = 0
+    keyword bool = false
     while !at_eol() {
-        skip_hspace()
-        if at_eol() { break }
-        astart u64 = ac.pos
-        depth u32 = 0
-        in_str bool = false
-        while ac.pos < n {
-            c u8 = p[u8, ac.pos]
-            if in_str {
-                if c == 92 && ac.pos + 1 < n { ac.pos += 2; continue }
-                if c == 34 { in_str = false }
-                ac.pos += 1
-                continue
-            }
-            if c == 34 { in_str = true; ac.pos += 1; continue }
-            if c == 40 { depth += 1; ac.pos += 1; continue }
-            if c == 41 && depth > 0 { depth -= 1; ac.pos += 1; continue }
-            if depth == 0 && (c == 44 || c == 10 || c == 59 || c == 35) { break }
-            ac.pos += 1
+        start u64 = ac.pos
+        end u64 = start
+        if is_ident_start(p[u8, start]) {
+            while end < n && is_ident_char(p[u8, end]) { end += 1 }
         }
-        aend u64 = ac.pos
-        while aend > astart && is_hspace(p[u8, aend - 1]) { aend -= 1 }
-        vec_push(&args, bytes(p + astart, aend - astart))
+        sep u64 = end
+        while sep < n && is_hspace(p[u8, sep]) { sep += 1 }
+        index u64 = position
+        if end != start && sep < n && p[u8, sep] == 61 && (sep + 1 == n || p[u8, sep + 1] != 61) {
+            param Bytes = bytes(p + start, end - start)
+            keyword = true
+            index = 0
+            while index < m.params.n && !bytes_eq(vec_at(&m.params, index).name, param) { index += 1 }
+            if index == m.params.n { try as_err_b(c"unknown macro parameter: ", param) }
+            ac.pos = sep + 1
+        } else if keyword { try as_err(c"cannot mix positional and keyword arguments") }
+        if index >= m.params.n { try as_err(c"too many macro arguments") }
+        mp handle[MacroParam] = vec_at(&m.params, index)
+        args.p[Bytes, index] = try invocation_argument(mp.vararg)
+        position += 1
+        skip_hspace()
         if ac.pos < n && p[u8, ac.pos] == 44 { ac.pos += 1 }
     }
 
@@ -215,18 +317,16 @@ fn try_invoke_macro(name Bytes) bool fails {
     for k u64 in 0..m.params.n {
         mp handle[MacroParam] = vec_at(&m.params, k)
         vec_push(&pnames, mp.name)
-        if k < args.n && vec_get(&args, k).n != 0 {
-            vec_push(&pvals, vec_get(&args, k))
-        } else if mp.has_default {
-            vec_push(&pvals, mp.def_val)
-        } else {
-            vec_push(&pvals, bytes_empty())
-        }
+        value Bytes = vec_get(&args, k)
+        if value.n == 0 && mp.required { try as_err_b(c"missing required macro argument: ", mp.name) }
+        if value.n == 0 && mp.has_default { value = mp.def_val }
+        if !mp.vararg { value = invocation_unquote(value) }
+        vec_push(&pvals, value)
     }
 
-    ac.macro_uid += 1
     expanded Buf = {}
     expand_macro_body(m.body, &pnames, &pvals, ac.macro_uid, &expanded)
+    ac.macro_uid += 1
     iid u32 = intern(&ac.names, buf_bytes(&expanded))
     push_source_frame(m.name, intern_name(&ac.names, iid))
     return true
@@ -234,8 +334,7 @@ fn try_invoke_macro(name Bytes) bool fails {
 
 fn parse_rept_directive() void fails {
     cnt i64 = try eval_const_now(try parse_expr())
-    skip_to_eol()
-    if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 10 { ac.pos += 1; ac.line += 1 }
+    advance_statement()
     body Bytes = try capture_block_body(1)
     if cnt <= 0 { return }
     expanded Buf = {}
@@ -249,35 +348,20 @@ fn parse_irp_directive(is_irpc bool) void fails {
     skip_hspace()
     if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 44 { ac.pos += 1 }
     vals Vec[Bytes] = {}
-    p addr = ac.src.p
-    n u64 = ac.src.n
     if is_irpc {
-        skip_hspace()
-        sstart u64 = ac.pos
-        while ac.pos < n && !at_eol() { ac.pos += 1 }
-        send u64 = ac.pos
-        while send > sstart && is_hspace(p[u8, send - 1]) { send -= 1 }
-        for k u64 in sstart..send {
-            vec_push(&vals, bytes(p + k, 1))
+        value Bytes = macro_unquote(macro_argument(false, true))
+        if !at_eol() { try as_err(c"unexpected argument after .irpc value") }
+        for k u64 in 0..value.n {
+            vec_push(&vals, bytes(value.p + k, 1))
         }
     } else {
         while !at_eol() {
+            vec_push(&vals, macro_unquote(macro_argument(false, true)))
             skip_hspace()
-            if at_eol() { break }
-            astart u64 = ac.pos
-            while ac.pos < n {
-                c u8 = p[u8, ac.pos]
-                if c == 44 || c == 10 || c == 59 || c == 35 { break }
-                ac.pos += 1
-            }
-            aend u64 = ac.pos
-            while aend > astart && is_hspace(p[u8, aend - 1]) { aend -= 1 }
-            vec_push(&vals, bytes(p + astart, aend - astart))
-            if ac.pos < n && p[u8, ac.pos] == 44 { ac.pos += 1 }
+            if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 44 { ac.pos += 1 }
         }
     }
-    skip_to_eol()
-    if ac.pos < n && p[u8, ac.pos] == 10 { ac.pos += 1; ac.line += 1 }
+    advance_statement()
     body Bytes = try capture_block_body(1)
     if vals.n == 0 { return }
     pnames Vec[Bytes] = {}
@@ -286,56 +370,41 @@ fn parse_irp_directive(is_irpc bool) void fails {
     for i u64 in 0..vals.n {
         pvals Vec[Bytes] = {}
         vec_push(&pvals, vec_get(&vals, i))
-        ac.macro_uid += 1
         expand_macro_body(body, &pnames, &pvals, ac.macro_uid, &expanded)
     }
     iid u32 = intern(&ac.names, buf_bytes(&expanded))
     push_source_frame(bytes_c(c"<irp>"), intern_name(&ac.names, iid))
 }
 
-// Skips lines in a false .if branch until matching .else, .elseif, or .endif.
+// Skips statements in a false branch until .else, .elseif or .endif.
 fn skip_false_branch(stop_at_else bool) void fails {
     depth u32 = 1
-    p addr = ac.src.p
-    n u64 = ac.src.n
-    while ac.pos < n {
-        line_start u64 = ac.pos
-        while ac.pos < n && p[u8, ac.pos] != 10 { ac.pos += 1 }
-        line_end u64 = ac.pos
-        i u64 = line_start
-        while i < line_end && is_hspace(p[u8, i]) { i += 1 }
-        if i < line_end && p[u8, i] == 46 {
-            j u64 = i
-            while j < line_end && is_ident_char(p[u8, j]) { j += 1 }
-            d Bytes = bytes(p + i, j - i)
-            if bytes_is(d, c".if") || bytes_is(d, c".ifdef") || bytes_is(d, c".ifndef") ||
-               bytes_is(d, c".ifb") || bytes_is(d, c".ifnb") || bytes_is(d, c".ifeqs") || bytes_is(d, c".ifnes") {
-                depth += 1
-            } else if bytes_is(d, c".endif") {
-                depth -= 1
-                if depth == 0 {
-                    if ac.pos < n && p[u8, ac.pos] == 10 { ac.pos += 1; ac.line += 1 }
-                    return
-                }
-            } else if depth == 1 && stop_at_else && bytes_is(d, c".else") {
-                if ac.pos < n && p[u8, ac.pos] == 10 { ac.pos += 1; ac.line += 1 }
-                vec_push(&ac.if_stack, 1) // active else branch
+    while ac.pos < ac.src.n {
+        d Bytes = statement_directive()
+        if bytes_is(d, c".if") || bytes_is(d, c".ifdef") || bytes_is(d, c".ifndef") ||
+           bytes_is(d, c".ifb") || bytes_is(d, c".ifnb") || bytes_is(d, c".ifeqs") || bytes_is(d, c".ifnes") ||
+           bytes_is(d, c".ifc") || bytes_is(d, c".ifnc") {
+            depth += 1
+        } else if bytes_is(d, c".endif") {
+            depth -= 1
+        } else if depth == 1 && stop_at_else {
+            active bool = bytes_is(d, c".else")
+            if bytes_is(d, c".elseif") { active = try eval_const_now(try parse_expr()) != 0 }
+            if active {
+                advance_statement()
+                vec_push(&ac.if_stack, 1)
                 return
-            } else if depth == 1 && stop_at_else && bytes_is(d, c".elseif") {
-                ac.pos = j
-                cond i64 = try eval_const_now(try parse_expr())
-                skip_to_eol()
-                if ac.pos < n && p[u8, ac.pos] == 10 { ac.pos += 1; ac.line += 1 }
-                if cond != 0 {
-                    vec_push(&ac.if_stack, 1)
-                    return
-                }
-                continue
             }
         }
-        if ac.pos < n && p[u8, ac.pos] == 10 { ac.pos += 1; ac.line += 1 }
+        advance_statement()
+        if depth == 0 { return }
     }
     try as_err(c"unterminated .if (missing .endif)")
+}
+
+fn begin_asm_if(active bool) void fails {
+    advance_statement()
+    if active { vec_push(&ac.if_stack, 1) } else { try skip_false_branch(true) }
 }
 
 fn resolve_include_file(rel Bytes, out handle[Buf]) Bytes fails {

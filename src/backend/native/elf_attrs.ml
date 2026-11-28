@@ -9,13 +9,21 @@ type alias = {
   visibility : int;  (** STV_DEFAULT 0, STV_HIDDEN 2, STV_PROTECTED 3 *)
 }
 
+type ifunc = {
+  iname : string;
+  resolver : string;
+  ibinding : int;
+  ivisibility : int;
+}
+
 type t = {
   binding : (string, int) Hashtbl.t;
   visibility : (string, int) Hashtbl.t;
   aliases : alias list;
+  ifuncs : ifunc list;
 }
 
-let empty () = { binding = Hashtbl.create 1; visibility = Hashtbl.create 1; aliases = [] }
+let empty () = { binding = Hashtbl.create 1; visibility = Hashtbl.create 1; aliases = []; ifuncs = [] }
 let weak t name = Hashtbl.find_opt t.binding name = Some 2
 
 let stv : Fir.visibility -> int = function Default -> 0 | Hidden -> 2 | Protected -> 3
@@ -38,4 +46,11 @@ let of_fir (m : Fir.modul) =
         :: acc)
       [] m.aliases
   in
-  { t with aliases = List.rev aliases }
+  let ifuncs =
+    Fir.Vec.fold
+      (fun acc (iv : Fir.ifunc) ->
+        note iv.iname iv.ilinkage iv.ivisibility;
+        { iname = iv.iname; resolver = iv.resolver; ibinding = stb iv.ilinkage; ivisibility = stv iv.ivisibility } :: acc)
+      [] m.ifuncs
+  in
+  { t with aliases = List.rev aliases; ifuncs = List.rev ifuncs }

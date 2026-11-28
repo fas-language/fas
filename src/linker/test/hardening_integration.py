@@ -39,7 +39,7 @@ class HardeningTests(unittest.TestCase):
 #include <stdint.h>
 #include <stdio.h>
 #include <signal.h>
-#include <sys/resource.h>
+#include <sys/prctl.h>
 #include <sys/wait.h>
 #include <unistd.h>
 int datum=7;
@@ -61,12 +61,14 @@ static int writable(void *pointer) {
 static int can_write(void *pointer) {
   pid_t child=fork(); if(child<0) return -1;
   if(child==0) {
-    struct rlimit limit={0,0}; setrlimit(RLIMIT_CORE,&limit);
+    /* A piped core_pattern can invoke a crash collector despite RLIMIT_CORE. */
+    if(prctl(PR_SET_DUMPABLE,0L,0L,0L,0L)!=0) _exit(125);
     signal(SIGSEGV,SIG_DFL);
     __asm__ volatile("orb $0,(%0)"::"r"(pointer):"memory");
     _exit(0);
   }
   int status; if(waitpid(child,&status,0)!=child) return -1;
+  if(WIFEXITED(status) && WEXITSTATUS(status)==125) return -1;
   return WIFEXITED(status) && WEXITSTATUS(status)==0;
 }
 __attribute__((constructor)) static void init(void){datum=42;}

@@ -82,7 +82,7 @@ let is_edit = function Mir_ra.Move _ | Ld _ | St _ | Remat _ -> true | Orig _ | 
    address fixed for the whole call, a thread's TLS block *)
 let remat_ok = function
   | Movi (_, _) | Tlsoff _ | Got _ | Tp _ -> true
-  | Lea (_, { base = Bslot _ | Bsym _ | Bnone | Bin; index = None; _ }) -> true
+  | Lea (_, { base = Bslot _ | Bsym _ | Babs _ | Bnone | Bin; index = None; _ }) -> true
   | _ -> false
 
 let run (f : func) (ra : Mir_ra.result) ~(slots : int array) =

@@ -18,6 +18,36 @@ type config = {
 
 type action = Help | Version | Link of config
 
+(* -z max-page-size=N: decimal or 0x-prefixed hexadecimal, a power of two from
+   4096 to 1 GiB. Digits are accumulated with an early bound so no value
+   overflows. *)
+let page_size text =
+  let bad () =
+    Error.fail
+      "invalid -z max-page-size value %s (expected a power of two from 4096 to 1073741824)" text
+  in
+  let hex = String.length text > 2 && (String.sub text 0 2 = "0x" || String.sub text 0 2 = "0X") in
+  let digits = if hex then String.sub text 2 (String.length text - 2) else text in
+  let radix = if hex then 16 else 10 in
+  if digits = "" then bad ();
+  let value =
+    String.fold_left
+      (fun value c ->
+        let d =
+          match c with
+          | '0' .. '9' -> Char.code c - 48
+          | 'a' .. 'f' when hex -> Char.code c - 87
+          | 'A' .. 'F' when hex -> Char.code c - 55
+          | _ -> bad ()
+        in
+        let value = (value * radix) + d in
+        if value > 1 lsl 30 then bad ();
+        value)
+      0 digits
+  in
+  if value < 4096 || value land (value - 1) <> 0 then bad ();
+  value
+
 let parse ?(link_only = false) arguments =
   let exception Stop of action in
   let application_option flag =
@@ -36,6 +66,7 @@ let parse ?(link_only = false) arguments =
     let allow_shlib_undefined = ref true and rpath_link = ref [] in
     let export_dynamic = ref false in
     let relro = ref true in
+    let max_page_size = ref 4096 in
     let shared = ref false and soname = ref None in
     let no_undefined = ref false in
     let allow_multiple_definition = ref false in
@@ -207,6 +238,9 @@ let parse ?(link_only = false) arguments =
           | "norelro" -> relro := false
           | "text" -> () (* All output modes already reject text relocations. *)
           | "now" -> ()
+          | "noexecstack" -> () (* Outputs never request an executable stack. *)
+          | _ when String.starts_with ~prefix:"max-page-size=" policy ->
+              max_page_size := page_size (String.sub policy 14 (String.length policy - 14))
           | "defs" -> no_undefined := true
           | "undefs" -> no_undefined := false
           | "muldefs" -> allow_multiple_definition := true
@@ -351,6 +385,7 @@ let parse ?(link_only = false) arguments =
             sysroot = !sysroot;
             nostdlib = !nostdlib;
             relro = !relro;
+            max_page_size = !max_page_size;
             soname = !soname;
             no_undefined = !no_undefined;
             allow_multiple_definition = !allow_multiple_definition;

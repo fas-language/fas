@@ -10,7 +10,8 @@ type tree = {
 let decode ~context ~size input ~offset ~length =
   let fail message = Error.fail "%s: zlib: %s" context message in
   Binary.span ~context ~length:(String.length input) offset length;
-  if size < 0 || size > 128 * 1024 * 1024 then fail "decoded size exceeds limit";
+  (* The caller bounds [size] by the decoded debug storage limit. *)
+  if size < 0 then fail "decoded size exceeds limit";
   if length < 6 then fail "truncated header or checksum";
   let byte i = Char.code input.[i] in
   let cmf = byte offset and flg = byte (offset + 1) in

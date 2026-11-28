@@ -16,6 +16,7 @@ struct Frame {
     encoding u32
     meta_start u32      // relocations the FDE keeps alive (for --gc-sections)
     meta_n u32
+    shared_cie u64      // packed section of a preceding, identical CIE
 }
 
 struct Cie {
@@ -321,7 +322,11 @@ fn unwind_section(f u64, k u64, u handle[UObj]) void fails {
             try ufail(o, c"unsupported relocation outside an unwind pointer field")
         }
     }
-    padding u64 = (8 - at % 8) % 8
+    alignment u64 = if config().has_script && config().shared { ls_word() } else { 8 }
+    if config().has_script && config().shared && s.alignment > alignment {
+        try ufail(o, c"unsupported scripted unwind alignment")
+    }
+    padding u64 = (alignment - at % alignment) % alignment
     nlen u64 = at + padding
     for i u64 in 1..zext[u64](o.nsym) {
         y handle[Sym] = sym(o, i)
@@ -340,7 +345,7 @@ fn unwind_section(f u64, k u64, u handle[UObj]) void fails {
     if has_last { wr32(e.p, start + last_at, last_length + padding) }
     s.offset = o.len + start
     s.size = nlen
-    s.alignment = 8
+    s.alignment = alignment
     map_free(rmap)
     map_free(cmap)
     map_free(ch)
@@ -443,6 +448,98 @@ fn unwind_prepare() void fails {
     l.alias = heap_alloc_zeroed(16)
     l.gotref = heap_alloc_zeroed(4)
     ld.unwind_file = file
+}
+
+// An unwind input with one CIE and no references into its records can
+// share that CIE with an immediately preceding input. Other inputs retain
+// their complete record stream, including personality relocations.
+fn unwind_shared_cie(x u64) Bytes {
+    f u64 = pk_file(x)
+    k u64 = pk_sec(x)
+    o handle[Obj] = obj(f)
+    s handle[Sec] = sec(o, k)
+    if s.size < 8 { return bytes_empty() }
+    data addr = sec_data(f, s)
+    prefix u64 = rd32(data, 0) + 4
+    if prefix >= s.size || prefix % s.alignment != 0 || rd32(data, 4) != 0 { return bytes_empty() }
+    at u64 = prefix
+    while at < s.size {
+        if rd32(data, at + 4) != at + 4 { return bytes_empty() }
+        at += rd32(data, at) + 4
+    }
+    for i u64 in 1..zext[u64](o.nsym) {
+        if zext[u64](sym(o, i).section) == k { return bytes_empty() }
+    }
+    for i u64 in 0..zext[u64](o.nrel) {
+        r handle[Rel] = rel(o, i)
+        if zext[u64](r.target) == k && r.offset < prefix { return bytes_empty() }
+    }
+    return bytes(data, prefix)
+}
+
+fn unwind_script_layout() void fails {
+    si u64 = ls_lookup(&ld.lscript.section_names, bytes_c(c".eh_frame"))
+    if si == 0 || !ls_sec(si).keep {
+        if ld.unwind_file != NONE64 { try refuse(c"scripted unwind records require a .eh_frame output section") }
+        return
+    }
+    s handle[LsSection] = ls_sec(si)
+    if s.fill_bytes != 0 || s.body.n != 1 {
+        try refuse(c"scripted .eh_frame requires a single input description")
+    }
+    c handle[LsCmd] = ls_cmd(vec_get(&s.body, 0))
+    if c.kind != LS_INPUT { try refuse(c"scripted .eh_frame requires unwind input records") }
+    preceding u64 = 0
+    cie Bytes = bytes_empty()
+    shared U64Map = {}
+    for i u64 in 0..c.inputs.n {
+        x u64 = vec_get(&c.inputs, i)
+        f u64 = pk_file(x)
+        k u64 = pk_sec(x)
+        o handle[Obj] = obj(f)
+        h handle[Sec] = sec(o, k)
+        if !bytes_is(h.name, c".eh_frame") { try refuse(c"non-unwind input in scripted .eh_frame") }
+        frames handle[Vec[Frame]] = &uobj(f).frames
+        for j u64 in 0..frames.n {
+            fr handle[Frame] = vec_at(frames, j)
+            if zext[u64](fr.section) == k && !(try unwind_active(fr)) {
+                try refuse(c"inactive FDE in scripted .eh_frame")
+            }
+        }
+        prefix Bytes = unwind_shared_cie(x)
+        if prefix.n == 0 || !bytes_eq(cie, prefix) {
+            cie = prefix
+            preceding = i
+            continue
+        }
+        h.offset += prefix.n
+        h.size -= prefix.n
+        for j u64 in 0..zext[u64](o.nrel) {
+            r handle[Rel] = rel(o, j)
+            if zext[u64](r.target) == k { r.offset -= prefix.n }
+        }
+        // Store the index of the retained CIE in the script input vector.
+        // The map only needs a 32-bit value, like other packed indices.
+        map_put(&shared, x, trunc[u32](preceding))
+    }
+    for i u64 in 0..ld.uframes.n {
+        fr handle[Frame] = vec_at(&ld.uframes, i)
+        f u64 = zext[u64](fr.file)
+        k u64 = zext[u64](fr.section)
+        p handle[Place] = place(f, k)
+        if p.valid == 0 || zext[u64](p.output_index) != si {
+            try refuse(c"live unwind record outside scripted .eh_frame")
+        }
+        at addr = map_val_addr(&shared, pk(f, k))
+        if at == null { continue }
+        other u64 = vec_get(&c.inputs, zext[u64](at[u32]))
+        prefix u64 = rd32(sec_data(pk_file(other), sec(obj(pk_file(other)), pk_sec(other))), 0) + 4
+        fr.offset -= prefix
+        fr.initial -= prefix
+        fr.shared_cie = other
+    }
+    map_free(&shared)
+    s.eh_terminator = true
 }
 
 // ---------- emit ----------
@@ -564,6 +661,14 @@ fn unwind_emit() void fails {
     for i u64 in 0..n {
         fr handle[Frame] = vec_at(&ld.uframes, i)
         p handle[Place] = try get_placement(zext[u64](fr.file), zext[u64](fr.section))
+        if fr.shared_cie != 0 {
+            cie handle[Place] = try get_placement(pk_file(fr.shared_cie), pk_sec(fr.shared_cie))
+            field u64 = p.address + fr.offset + 4
+            if field < cie.address || field - cie.address > 0xffffffff {
+                try refuse(c"shared CIE is out of scripted FDE range")
+            }
+            wr32(ld.image, p.offset + fr.offset + 4, field - cie.address)
+        }
         field u64 = p.offset + fr.initial
         raw u64 = 0
         if fr.encoding == 0x1b {

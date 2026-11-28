@@ -906,8 +906,244 @@ let parse_module text =
     m.funcs;
   m
 
+(* ---------- wide/huge integer fuzz generator (-wide) ---------- *)
+
+let wide_mode = ref false
+let wide_ops_per_seed = ref 1000
+
+let gen_wide_const rs w =
+  let k = (w + 63) / 64 in
+  let rem = w mod 64 in
+  let limbs =
+    match Random.State.int rs 6 with
+    | 0 -> Array.make k 0L
+    | 1 -> Array.make k (-1L)
+    | 2 -> Array.init k (fun i -> if i = 0 then Int64.of_int (Random.State.int rs 256) else 0L)
+    | 3 -> Array.init k (fun i -> if i = k - 1 then Int64.shift_left 1L ((w - 1) mod 64) else 0L) (* smin *)
+    | 4 -> Array.init k (fun i -> if i = k - 1 then Int64.pred (Int64.shift_left 1L ((w - 1) mod 64)) else -1L) (* smax *)
+    | _ -> Array.init k (fun _ -> Int64.logor (Int64.shift_left (Random.State.int64 rs 0x100000000L) 32) (Random.State.int64 rs 0x100000000L))
+  in
+  if rem <> 0 then limbs.(k - 1) <- Int64.logand limbs.(k - 1) (Int64.pred (Int64.shift_left 1L rem));
+  let b = Buffer.create (k * 16 + 4) in
+  Buffer.add_string b "0x";
+  let started = ref false in
+  for i = k - 1 downto 0 do
+    if !started then Printf.bprintf b "%016Lx" limbs.(i)
+    else if limbs.(i) <> 0L || i = 0 then begin
+      started := true;
+      Printf.bprintf b "%Lx" limbs.(i)
+    end
+  done;
+  Buffer.contents b
+
+let gen_wide_module seed =
+  let rs = Random.State.make [| seed; 0x57494445 |] in
+  let buf = Buffer.create 32768 in
+  Buffer.add_string buf "triple \"x86_64-unknown-linux-gnu\"\n";
+  let huge_widths = [| 513; 575; 576; 600; 640; 768; 1024; 1025 |] in
+  let small_widths = [| 33; 64; 128; 256; 512 |] in
+  let w1 = huge_widths.(Random.State.int rs (Array.length huge_widths)) in
+  let w2 = huge_widths.(Random.State.int rs (Array.length huge_widths)) in
+  let ws = small_widths.(Random.State.int rs (Array.length small_widths)) in
+  let n_ops = !wide_ops_per_seed in
+  let next = ref 0 in
+  let fv () = incr next; Printf.sprintf "%%v%d" !next in
+  let ln fmt = Printf.ksprintf (fun s -> Buffer.add_string buf "  "; Buffer.add_string buf s; Buffer.add_char buf '\n') fmt in
+  (* Helper function testing huge ABI (call/ret) + 2-param parallel swap loop *)
+  let t1 = Printf.sprintf "i%d" w1 in
+  Printf.bprintf buf "func @wide_loop (%s, %s, i64) -> (%s) local {\n" t1 t1 t1;
+  Printf.bprintf buf "^entry(%%a0: %s, %%b0: %s, %%n: i64):\n" t1 t1;
+  ln "jump ^lp(%%a0, %%b0, %%n)";
+  Printf.bprintf buf "^lp(%%a: %s, %%b: %s, %%i: i64):\n" t1 t1;
+  ln "%%done = icmp eq i1 %%i, i64 0";
+  ln "br %%done, ^ret, ^step";
+  Buffer.add_string buf "^step:\n";
+  ln "%%sum = add %s %%a, %%b" t1;
+  ln "%%xr = xor %s %%sum, %%a" t1;
+  ln "%%i1 = sub i64 %%i, i64 1";
+  ln "jump ^lp(%%b, %%xr, %%i1)";
+  Buffer.add_string buf "^ret:\n";
+  ln "ret %%a";
+  Buffer.add_string buf "}\n";
+  (* Main function running n_ops randomized ops on w1, w2, ws *)
+  Buffer.add_string buf "func @main (i32, ptr) -> (i32) global {\n^entry(%argc: i32, %argv: ptr):\n";
+  let bytes1 = ((w1 + 63) / 64) * 8 in
+  ln "%%mem = alloca ptr i64 %d, align 16" (max 256 (bytes1 * 2));
+  ln "%%out = alloca ptr i64 16, align 8";
+  (* seed pool of w1 values *)
+  let pool = Array.init 6 (fun _ ->
+      let v = fv () in
+      ln "%s = add %s %s %s, %s 0" v t1 t1 (gen_wide_const rs w1) t1;
+      v) in
+  let pick () = pool.(Random.State.int rs (Array.length pool)) in
+  let put v = pool.(Random.State.int rs (Array.length pool)) <- v in
+  let acc = ref (fv ()) in
+  ln "%s = add i64 i64 0, i64 0" !acc;
+  let fold64 x =
+    let a = fv () in
+    ln "%s = xor i64 %s, %s" a !acc x;
+    acc := a
+  in
+  (* call wide_loop once to test huge ABI + parallel phi swap *)
+  let lr = fv () in
+  ln "%s = call (%s, %s, i64) -> (%s) @wide_loop(%s, %s, i64 5)" lr t1 t1 t1 (pick ()) (pick ());
+  put lr;
+  (* test switch on huge value *)
+  let sw_k1 = gen_wide_const rs w1 in
+  let sw_k2 = let c = gen_wide_const rs w1 in if c = sw_k1 then (if c = "0x1" then "0x2" else "0x1") else c in
+  let sw_v = pick () in
+  let sw_r = fv () in
+  ln "switch %s, ^sw_d, [%s: ^sw_1, %s: ^sw_2]" sw_v sw_k1 sw_k2;
+  Buffer.add_string buf "^sw_1:\n"; ln "jump ^sw_m(i64 11)";
+  Buffer.add_string buf "^sw_2:\n"; ln "jump ^sw_m(i64 22)";
+  Buffer.add_string buf "^sw_d:\n"; ln "jump ^sw_m(i64 33)";
+  Printf.bprintf buf "^sw_m(%s: i64):\n" sw_r;
+  fold64 sw_r;
+  let nz_const w =
+    let c = gen_wide_const rs w in
+    if c = "0x0" then "0x1" else c
+  in
+  for _ = 1 to n_ops do
+    let a = pick () and b = pick () in
+    match Random.State.int rs 24 with
+    | 0 -> let r = fv () in ln "%s = add %s %s, %s" r t1 a b; put r
+    | 1 -> let r = fv () in ln "%s = sub %s %s, %s" r t1 a b; put r
+    | 2 -> let r = fv () in ln "%s = mul %s %s, %s" r t1 a b; put r
+    | 3 -> let r = fv () in ln "%s = and %s %s, %s" r t1 a b; put r
+    | 4 -> let r = fv () in ln "%s = or %s %s, %s" r t1 a b; put r
+    | 5 -> let r = fv () in ln "%s = xor %s %s, %s" r t1 a b; put r
+    | 6 ->
+        let op = [| "shl"; "lshr"; "ashr" |].(Random.State.int rs 3) in
+        let amt = Random.State.int rs w1 in
+        let r = fv () in
+        ln "%s = %s %s %s, %s %d" r op t1 a t1 amt; put r
+    | 7 ->
+        let op = [| "umin"; "umax"; "smin"; "smax" |].(Random.State.int rs 4) in
+        let r = fv () in ln "%s = %s %s %s, %s" r op t1 a b; put r
+    | 8 ->
+        let op = [| "uadd_sat"; "usub_sat"; "sadd_sat"; "ssub_sat" |].(Random.State.int rs 4) in
+        let r = fv () in ln "%s = %s %s %s, %s" r op t1 a b; put r
+    | 9 ->
+        let op = [| "uadd_ovf"; "usub_ovf"; "sadd_ovf"; "ssub_ovf"; "umul_ovf"; "smul_ovf" |].(Random.State.int rs 6) in
+        let r = fv () and o = fv () and ow = fv () in
+        ln "%s, %s = %s (%s, i1) %s, %s" r o op t1 a b;
+        ln "%s = zext i64 %s" ow o;
+        put r; fold64 ow
+    | 10 ->
+        let pred = [| "eq"; "ne"; "ult"; "ugt"; "ule"; "uge"; "slt"; "sgt"; "sle"; "sge" |].(Random.State.int rs 10) in
+        let c = fv () and cw = fv () in
+        ln "%s = icmp %s i1 %s, %s" c pred a b;
+        ln "%s = zext i64 %s" cw c;
+        fold64 cw
+    | 11 ->
+        let c = fv () and r = fv () in
+        ln "%s = icmp ult i1 %s, %s" c a b;
+        ln "%s = select %s %s, %s, %s" r t1 c a b;
+        put r
+    | 12 ->
+        let op = [| "popcnt"; "ctz"; "clz"; "abs"; "bitrev" |].(Random.State.int rs 5) in
+        let r = fv () in ln "%s = %s %s %s" r op t1 a; put r
+    | 13 ->
+        let op = [| "fshl"; "fshr" |].(Random.State.int rs 2) in
+        let r = fv () in ln "%s = %s %s %s, %s, %s %d" r op t1 a b t1 (Random.State.int rs (w1 * 2)); put r
+    | 14 ->
+        (* load / store round-trip *)
+        ln "store %s, %%mem, align 8" a;
+        let r = fv () in ln "%s = load %s %%mem, align 8" r t1; put r
+    | 15 ->
+        (* cross-width ext/trunc: w1 -> w2 -> w1 *)
+        let t2 = Printf.sprintf "i%d" w2 in
+        let k1 = if w2 > w1 then (if Random.State.bool rs then "sext" else "zext") else "trunc" in
+        let k2 = if w1 > w2 then (if Random.State.bool rs then "sext" else "zext") else "trunc" in
+        if w2 <> w1 then begin
+          let m = fv () and r = fv () in
+          ln "%s = %s %s %s" m k1 t2 a;
+          ln "%s = %s %s %s" r k2 t1 m;
+          put r
+        end
+    | 16 ->
+        (* small <-> huge conversion: w1 -> ws -> w1 *)
+        let ts = Printf.sprintf "i%d" ws in
+        let m = fv () and r = fv () in
+        let k2 = if Random.State.bool rs then "sext" else "zext" in
+        ln "%s = trunc %s %s" m ts a;
+        ln "%s = %s %s %s" r k2 t1 m;
+        put r
+    | 17 ->
+        (* same-k widening/narrowing: w1 -> w1+7 -> w1 (tests same-k sext!) *)
+        let w1p = w1 + 7 in
+        let tp = Printf.sprintf "i%d" w1p in
+        let m = fv () and r = fv () in
+        let k1 = if Random.State.bool rs then "sext" else "zext" in
+        ln "%s = %s %s %s" m k1 tp a;
+        ln "%s = trunc %s %s" r t1 m;
+        put r
+    | 18 ->
+        (* udiv/urem/sdiv/srem with nonzero divisor (sparse to keep fast) *)
+        if Random.State.int rs 8 = 0 then begin
+          let op = [| "udiv"; "urem"; "sdiv"; "srem" |].(Random.State.int rs 4) in
+          let dv = fv () and r = fv () in
+          ln "%s = add %s %s %s, %s 0" dv t1 t1 (nz_const w1) t1;
+          ln "%s = %s %s %s, %s" r op t1 a dv;
+          put r
+        end
+    | 19 ->
+        (* umulh / smulh (sparse) *)
+        if Random.State.int rs 4 = 0 then begin
+          let op = if Random.State.bool rs then "umulh" else "smulh" in
+          let r = fv () in ln "%s = %s %s %s, %s" r op t1 a b; put r
+        end
+    | 20 ->
+        (* float <-> huge int (sitofp/uitofp -> f64, fptosi_sat/fptoui_sat -> iW) *)
+        let op1 = if Random.State.bool rs then "sitofp" else "uitofp" in
+        let op2 = if Random.State.bool rs then "fptosi_sat" else "fptoui_sat" in
+        let f = fv () and fb = fv () and r = fv () in
+        ln "%s = %s f64 %s" f op1 a;
+        ln "%s = bitcast i64 %s" fb f;
+        fold64 fb;
+        ln "%s = %s %s %s" r op2 t1 f;
+        put r
+    | 21 ->
+        (* clmul / clmul_hi (sparse) *)
+        if Random.State.int rs 16 = 0 then begin
+          let op = if Random.State.bool rs then "clmul" else "clmul_hi" in
+          let r = fv () in ln "%s = %s %s %s, %s" r op t1 a b; put r
+        end
+    | 22 ->
+        (* bswap when w1 mod 16 = 0 *)
+        if w1 mod 16 = 0 then begin
+          let r = fv () in ln "%s = bswap %s %s" r t1 a; put r
+        end
+    | _ ->
+        (* fold a pool value's low 64 bits + top bits into digest *)
+        let lo = fv () and sh = fv () and hi = fv () in
+        ln "%s = trunc i64 %s" lo a;
+        ln "%s = lshr %s %s, %s %d" sh t1 a t1 (w1 - 64);
+        ln "%s = trunc i64 %s" hi sh;
+        fold64 lo; fold64 hi
+  done;
+  (* Final fold of all pool values *)
+  Array.iter (fun v ->
+      let lo = fv () and sh = fv () and hi = fv () in
+      ln "%s = trunc i64 %s" lo v;
+      ln "%s = lshr %s %s, %s %d" sh t1 v t1 (w1 - 64);
+      ln "%s = trunc i64 %s" hi sh;
+      fold64 lo; fold64 hi)
+    pool;
+  ln "store %s, %%out, align 8" !acc;
+  let pi = fv () and w = fv () in
+  ln "%s = ptrtoint i64 %%out" pi;
+  ln "%s = syscall i64 i64 1, i64 1, %s, i64 8" w pi;
+  ln "ret i32 0";
+  Buffer.add_string buf "}\n";
+  Buffer.contents buf
+
 let check_seed tmp seed =
-  let text = if !file <> "" then read !file else gen_module seed in
+  let text =
+    if !file <> "" then read !file
+    else if !wide_mode then gen_wide_module seed
+    else gen_module seed
+  in
   let save () =
     let path = Filename.concat !keep (Printf.sprintf "fir_fuzz_%d.fir" seed) in
     write path text;
@@ -926,9 +1162,15 @@ let check_seed tmp seed =
               let ll = Filename.concat tmp "m.ll" in
               write ll llvm_text;
               (* -lm: without SSE4.1, LLVM lowers floor/ceil/... to libm calls *)
+              let cc =
+                match Sys.getenv_opt "FAS_TEST_REFCACHE" with
+                | None -> !cc
+                | Some path ->
+                    Printf.sprintf "python3 %s fir-fuzz %s %s" (Filename.quote path) (Filename.quote tmp) !cc
+              in
               let lstatus =
                 Sys.command
-                  (Printf.sprintf "%s -O2 -w -x ir %s -lm -latomic -o %s 2>%s" !cc (Filename.quote ll) (Filename.quote lexe)
+                  (Printf.sprintf "%s -O2 -w -x ir %s -lm -latomic -o %s 2>%s" cc (Filename.quote ll) (Filename.quote lexe)
                      (Filename.quote (Filename.concat tmp "cc.err")))
               in
               if lstatus <> 0 then
@@ -1001,6 +1243,8 @@ let () =
       ("-v", Arg.Set verbose, " print every seed");
       ("-mir", Arg.Unit ignore, " no effect (the native side is always the machine IR)");
       ("-file", Arg.String (fun f -> file := f; count := 1), "PATH check this .fir module instead of generating");
+      ("-wide", Arg.Set wide_mode, " generate huge-integer (>512-bit) fuzz modules");
+      ("-wide-ops", Arg.Set_int wide_ops_per_seed, "N operations per -wide seed (default 1000)");
     ]
     (fun _ -> ())
     "fir_fuzz [-n COUNT] [-seed FIRST] [-keep DIR]";

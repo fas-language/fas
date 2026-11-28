@@ -1,0 +1,365 @@
+#!/usr/bin/env bash
+# Compare fcc's i386 front end with Clang, including the real-mode data model.
+set -euo pipefail
+ulimit -f 524288
+
+root=$(cd -- "$(dirname -- "$0")/.." && pwd)
+fcc=${FCC:-$root/_build/fcc}
+clang=${CLANG:-clang-22}
+export FCC_INCLUDE=${FCC_INCLUDE:-$root/cc/include}
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/fcc-i386.XXXXXX")
+trap 'rm -rf -- "$tmp"' EXIT
+
+cat > "$tmp/layout.c" <<'C'
+#if !defined(__i386__) || !defined(__ILP32__) || defined(__LP64__) || defined(__SIZEOF_INT128__)
+#error wrong predefined target
+#endif
+#include <stddef.h>
+#include <stdint.h>
+#include <stdarg.h>
+
+#define TYPE(e, t) _Generic((e), t: 1, default: 0)
+_Static_assert(sizeof(void *) == 4 && sizeof(long) == 4 && sizeof(long long) == 8, "ILP32 sizes");
+_Static_assert(sizeof(long double) == 12 && _Alignof(long double) == 4, "extended precision layout");
+_Static_assert(sizeof(va_list) == 4 && TYPE((va_list)0, char *), "stack va_list");
+_Static_assert(TYPE(sizeof(int), unsigned int), "sizeof result");
+_Static_assert(TYPE((size_t)0, unsigned int), "size_t");
+_Static_assert(TYPE((ptrdiff_t)0, int), "ptrdiff_t");
+_Static_assert(TYPE((int *)0 - (int *)0, int), "pointer subtraction result");
+_Static_assert(TYPE((uint64_t)0, unsigned long long), "uint64_t");
+_Static_assert(TYPE(2147483648, long long), "large decimal literal");
+_Static_assert(TYPE(0x80000000L, unsigned long), "hex long literal");
+_Static_assert(TYPE(0x100000000UL, unsigned long long), "large unsigned literal");
+_Static_assert(TYPE(1L + 1U, unsigned long), "usual arithmetic conversions");
+
+struct layout { char a; double b; long long c; void *d; };
+_Static_assert(offsetof(struct layout, b) == 4, "double member alignment");
+_Static_assert(offsetof(struct layout, c) == 12, "long long member alignment");
+_Static_assert(offsetof(struct layout, d) == 20 && sizeof(struct layout) == 24, "record layout");
+_Static_assert(TYPE(offsetof(struct layout, c), size_t), "offsetof result");
+C
+
+for mode in -m32 -m16; do
+    "$clang" "$mode" -march=i386 -std=gnu23 -ffreestanding -fsyntax-only "$tmp/layout.c"
+    "$fcc" "$mode" -march=i386 -std=gnu23 -ffreestanding -fsyntax-only "$tmp/layout.c"
+done
+
+printf 'fcc i386 and real-mode data model matches Clang\n'
+
+lld=${LLD:-ld.lld-22}
+readelf=${READELF:-readelf}
+objdump=${OBJDUMP:-objdump}
+flags=(-march=i386 -std=gnu23 -ffreestanding -fno-pic -fno-stack-protector
+       -fno-asynchronous-unwind-tables -fno-unwind-tables -mno-sse -msoft-float)
+
+cat > "$tmp/hidden.c" <<'C'
+extern int vvar __attribute__((visibility("hidden")));
+int read_vvar(void) { return vvar; }
+C
+"$fcc" -m32 "${flags[@]}" -fpic -c "$tmp/hidden.c" -o "$tmp/hidden.o"
+"$readelf" -rW "$tmp/hidden.o" > "$tmp/hidden.relocs"
+"$readelf" -sW "$tmp/hidden.o" > "$tmp/hidden.syms"
+grep -Eq 'R_386_GOTOFF .* vvar$' "$tmp/hidden.relocs"
+grep -Eq 'GLOBAL +HIDDEN +UND +vvar$' "$tmp/hidden.syms"
+
+cat > "$tmp/impl.c" <<'C'
+#include <stdarg.h>
+#include <stdint.h>
+
+extern unsigned adjust(unsigned x);
+extern const unsigned bias;
+const unsigned * const bias_ptr = &bias;
+
+unsigned long update_long(long value, unsigned long mask)
+{
+    return (unsigned long)(value + adjust(3)) ^ mask;
+}
+
+uint64_t product(unsigned a, unsigned b)
+{
+    uint64_t result;
+    __asm__("mull %2" : "=A"(result) : "a"(a), "rm"(b));
+    __asm__("" : "=rm"(result) : "0"(result));
+    return result;
+}
+
+unsigned overflow(uint64_t a, uint64_t b, int left, int right, uint64_t *sum, int *diff)
+{
+    unsigned carry = __builtin_add_overflow(a, b, sum);
+    unsigned borrow = __builtin_sub_overflow(a, b, sum + 1);
+    unsigned signed_overflow = __builtin_sub_overflow(left, right, diff);
+    return carry | (borrow << 1) | (signed_overflow << 2);
+}
+
+uint64_t mix(uint64_t a, uint64_t b, unsigned shift, unsigned mask)
+{
+    uint64_t x = (a * b + mask) ^ (b >> shift);
+    if (x < a)
+        x += (uint64_t)adjust(mask) << (shift & 31);
+    return x + *bias_ptr;
+}
+
+static unsigned call_with_tail(unsigned (*fn)(unsigned), unsigned x)
+{
+    return fn(x ^ 3);
+}
+
+unsigned dispatch(unsigned (*fn)(unsigned), unsigned x)
+{
+    return call_with_tail(fn, x) + 7;
+}
+
+unsigned rotate_local(unsigned n, unsigned a, unsigned b, unsigned c)
+{
+    while (n--) {
+        unsigned old = a;
+        a = b;
+        b = c;
+        c = old;
+    }
+    return a + b * 5 + c * 23;
+}
+
+uint64_t fixed_shifts(uint64_t v)
+{
+    return (v << 31) ^ (v >> 33) ^ (uint64_t)((int64_t)v >> 35);
+}
+
+unsigned classify(signed char c, short s, uint64_t key)
+{
+    unsigned result = 0;
+    if (c < -17 || s > 0x4567)
+        result |= 4;
+    if (s & 0x8000)
+        result |= 8;
+    switch (key) {
+    case 0:
+        return result | 1;
+    case UINT64_C(0x100040008):
+        return result | 2;
+    default:
+        return result | 3;
+    }
+}
+
+uint64_t move_indexed(uint64_t *table, unsigned to, unsigned from)
+{
+    uint64_t value = table[from];
+    table[to] = value;
+    return value;
+}
+
+unsigned collect(unsigned n, ...)
+{
+    va_list args, copy;
+    va_start(args, n);
+    va_copy(copy, args);
+    unsigned s = 0;
+    for (unsigned i = 0; i < n; i++)
+        s += va_arg(args, unsigned);
+    if (n != 0)
+        s += va_arg(copy, unsigned);
+    va_end(copy);
+    va_end(args);
+    return s;
+}
+C
+
+cat > "$tmp/entry.c" <<'C'
+#include <stdint.h>
+extern uint64_t mix(uint64_t, uint64_t, unsigned, unsigned);
+extern unsigned dispatch(unsigned (*)(unsigned), unsigned);
+extern unsigned collect(unsigned, ...);
+extern unsigned long update_long(long, unsigned long);
+extern uint64_t product(unsigned, unsigned);
+extern unsigned overflow(uint64_t, uint64_t, int, int, uint64_t *, int *);
+extern unsigned rotate_local(unsigned, unsigned, unsigned, unsigned);
+extern uint64_t fixed_shifts(uint64_t);
+extern unsigned classify(signed char, short, uint64_t);
+extern uint64_t move_indexed(uint64_t *, unsigned, unsigned);
+extern const unsigned * const bias_ptr;
+
+const unsigned bias = 19;
+unsigned adjust(unsigned value) { return value * 5 + 11; }
+
+static uint64_t reference(uint64_t a, uint64_t b, unsigned s, unsigned mask)
+{
+    uint64_t expected = (a * b + mask) ^ (b >> s);
+    return expected + (expected < a ? (uint64_t)(mask * 5 + 11) << (s & 31) : 0) + 19;
+}
+
+int run(void)
+{
+    for (unsigned i = 0; i < 64; i++) {
+        uint64_t a = UINT64_C(0xfedcba984634de12) + i;
+        uint64_t b = UINT64_C(0x876543212963180f) - i;
+        if (mix(a, b, i, i * 9) != reference(a, b, i, i * 9))
+            return i + 1;
+    }
+    unsigned values[] = { 3, 16, 714, 2 };
+    if (dispatch(adjust, 145) != adjust(145 ^ 3) + 7)
+        return 65;
+    if (collect(0) != 0 || collect(4, values[0], values[1], values[2], values[3]) != 738)
+        return 66;
+    if (bias_ptr != &bias || values + 1 - (values + 3) != -2)
+        return 67;
+    if (update_long(-32, 0x80000000UL) != 0x7ffffffaUL)
+        return 68;
+    if (product(0x12345678, 0xf0123456) != UINT64_C(0x11125c7753956c50))
+        return 69;
+    uint64_t sum[2];
+    int diff;
+    if (overflow(UINT64_MAX, 3, 0x7fffffff, -1, sum, &diff) != 5 ||
+        sum[0] != 2 || sum[1] != UINT64_MAX - 3 || diff != (-0x7fffffff - 1))
+        return 70;
+    if (overflow(2, 5, 13, 5, sum, &diff) != 2 ||
+        sum[0] != 7 || sum[1] != UINT64_MAX - 2 || diff != 8)
+        return 71;
+    if (rotate_local(9, 1, 7, 13) != 335 || rotate_local(10, 1, 7, 13) != 95)
+        return 72;
+    uint64_t v = UINT64_C(0xe8f7abcdee123459);
+    if (fixed_shifts(v) != ((v << 31) ^ (v >> 33) ^ (uint64_t)((int64_t)v >> 35)))
+        return 73;
+    if (classify(-20, -2, 0) != 13 || classify(0, 0x4568, UINT64_C(0x100040008)) != 6 ||
+        classify(-17, 0, 0x40008) != 3)
+        return 74;
+    uint64_t table[] = {0, 3, v, 201};
+    if (move_indexed(table, 1, 2) != v || table[1] != v || table[2] != v || table[3] != 201)
+        return 75;
+    return 0;
+}
+C
+
+cat > "$tmp/start.s" <<'ASM'
+.text
+.globl _start
+_start:
+    andl $-16, %esp
+    call run
+    movl %eax, %ebx
+    movl $1, %eax
+    int $0x80
+.globl abort
+abort:
+    movl $127, %ebx
+    movl $1, %eax
+    int $0x80
+.section .note.GNU-stack,"",@progbits
+ASM
+
+"$clang" -m32 -c "$tmp/start.s" -o "$tmp/start.o"
+# Verify execution support with a dedicated exit syscall, separate from test failures.
+printf '.text\n.globl _start\n_start: xorl %%ebx, %%ebx; movl $1, %%eax; int $0x80\n' > "$tmp/probe.s"
+"$clang" -m32 -c "$tmp/probe.s" -o "$tmp/probe.o"
+"$lld" -m elf_i386 -o "$tmp/host-probe" "$tmp/probe.o"
+runner=()
+if ! "$tmp/host-probe"; then
+    runner=("${QEMU_I386:-qemu-i386}")
+fi
+
+for regparm in 0 3; do
+    options=(-m32 "-mregparm=$regparm" "${flags[@]}")
+    "$clang" "${options[@]}" -O2 -c "$tmp/entry.c" -o "$tmp/clang-entry.o"
+    "$clang" "${options[@]}" -O2 -c "$tmp/impl.c" -o "$tmp/clang-impl.o"
+    "$fcc" "${options[@]}" -c "$tmp/entry.c" -o "$tmp/fcc-entry.o"
+    "$fcc" "${options[@]}" -c "$tmp/impl.c" -o "$tmp/fcc-impl.o"
+    for pair in 'clang clang' 'clang fcc' 'fcc clang' 'fcc fcc'; do
+        read -r entry impl <<< "$pair"
+        "$lld" -m elf_i386 -o "$tmp/run" "$tmp/start.o" "$tmp/$entry-entry.o" "$tmp/$impl-impl.o"
+        "${runner[@]}" "$tmp/run" || { status=$?; echo "regparm=$regparm, entry=$entry, implementation=$impl: exit $status" >&2; exit "$status"; }
+    done
+done
+printf 'Eight i386 executable comparisons passed (cdecl and regparm=3)\n'
+
+# Small executable cases from the gcc-torture-execute manifest. These
+# use no libc or multilib startup files, just the syscall shim above.
+corpus=${FCC_I386_CORPUS:-$root/../cc-tests}
+if [[ -f $corpus/manifest.json ]]; then
+    suite=$corpus/upstream/gcc/gcc/testsuite/gcc.c-torture/execute
+    samples=(20140212-2.c 20170419-1.c bswap-3.c pr31072.c pr37780.c pr61306-2.c pr64718.c pr83362.c)
+    for sample in "${samples[@]}"; do
+        for compiler in "$clang" "$fcc"; do
+            "$compiler" -m32 "${flags[@]}" -O2 -Dmain=run -c "$suite/$sample" -o "$tmp/manifest.o"
+            "$lld" -m elf_i386 -o "$tmp/run" "$tmp/start.o" "$tmp/manifest.o"
+            "${runner[@]}" "$tmp/run" || {
+                status=$?
+                printf '%s %s exited %d\n' "$compiler" "$sample" "$status" >&2
+                exit "$status"
+            }
+        done
+    done
+    printf '%d freestanding manifest cases passed with fcc and Clang -m32\n' "${#samples[@]}"
+fi
+
+for compiler in "$clang" "$fcc"; do
+    "$compiler" -m16 -mstack-alignment=4 -mregparm=3 "${flags[@]}" -c "$tmp/impl.c" -o "$tmp/real.o"
+    "$readelf" -h "$tmp/real.o" > "$tmp/real.header"
+    "$readelf" -rW "$tmp/real.o" > "$tmp/real.relocs"
+    "$objdump" -dr -M i8086 "$tmp/real.o" > "$tmp/real.dis"
+    grep -q ELF32 "$tmp/real.header"
+    grep -q 'Intel 80386' "$tmp/real.header"
+    grep -q 'R_386_32.*bias' "$tmp/real.relocs"
+    grep -Eq '\b66 c3[[:space:]]+retl\b' "$tmp/real.dis"
+done
+printf 'Both -m16 objects use ELF32, i386 relocations, and 32-bit returns\n'
+
+qemu_system=${QEMU_SYSTEM_I386:-qemu-system-i386}
+if command -v "$qemu_system" >/dev/null; then
+    cat > "$tmp/step.c" <<'C'
+unsigned step(unsigned a, unsigned b, unsigned c)
+{
+    unsigned scaled;
+    __asm__("leal (%1,%1,8), %0" : "=r"(scaled) : "r"(a));
+    return scaled + b - c;
+}
+C
+    cat > "$tmp/boot.s" <<'ASM'
+.section .init,"ax"
+.code16gcc
+.globl _start
+_start:
+    cli
+    xorw %ax, %ax
+    movw %ax, %ds
+    movw %ax, %ss
+    movl $0x7c00, %esp
+    movl $7, %eax
+    movl $9, %edx
+    movl $5, %ecx
+    calll step
+    cmpl $67, %eax
+    jne fail
+    movb $0x21, %al
+    jmp exit
+fail:
+    movb $0x22, %al
+exit:
+    outb %al, $0xf4
+    hlt
+.section .note.GNU-stack,"",@progbits
+ASM
+    cat > "$tmp/boot.lds" <<'LDS'
+ENTRY(_start)
+SECTIONS {
+  . = 0x7c00;
+  .text : { *(.init) *(.text) }
+  . = 0x7c00 + 510;
+  .signature : { SHORT(0xaa55) }
+  /DISCARD/ : { *(.note*) }
+}
+LDS
+    "$clang" -m32 -c "$tmp/boot.s" -o "$tmp/boot.o"
+    for compiler in "$clang" "$fcc"; do
+        "$compiler" -m16 -mstack-alignment=4 -mregparm=3 "${flags[@]}" -c "$tmp/step.c" -o "$tmp/step.o"
+        "$lld" -m elf_i386 -T "$tmp/boot.lds" --oformat=binary "$tmp/boot.o" "$tmp/step.o" -o "$tmp/boot.img"
+        [ "$(wc -c < "$tmp/boot.img")" -eq 512 ]
+        status=0
+        timeout 12 "$qemu_system" -m 16 -display none -nodefaults -no-reboot \
+            -device isa-debug-exit,iobase=0xf4,iosize=4 -drive "file=$tmp/boot.img,format=raw" || status=$?
+        if [ "$status" -ne 67 ]; then
+            echo "$compiler: expected QEMU status 67, got $status" >&2
+            exit 1
+        fi
+    done
+    printf 'Both -m16 objects executed with regparm=3 under QEMU BIOS\n'
+fi

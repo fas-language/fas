@@ -134,6 +134,8 @@ let signature mc ~params ~ret ~ret_extension ~variadic =
     param_abis = List.map (fun (t, e) -> abi mc.lay t e) params;
     result_abis = result_abis mc.lay ret ret_extension;
     variadic;
+    ms_abi = false;
+    ms_xmm_result = false;
   }
 
 (* Symbols. A C entity's internal name is `c.NAME` and its symbol NAME. A Fas
@@ -259,7 +261,7 @@ let var fn ~name ~ty ~arg home =
     fn.loc <- loc_id ~scope:vscope fn.mc file line col;
     Hashtbl.replace fn.last_loc fn.cur fn.loc
   end;
-  fn.vars <- { vname = name; vty = ty; vscope; vloc = fn.loc; varg = arg; home = Some home } :: fn.vars
+  fn.vars <- { vname = name; vty = ty; vscope; vloc = fn.loc; varg = arg; home = Some home; vstack = false; vindirect = false; vsymbol = None } :: fn.vars
 
 let is_open fn b = not (Hashtbl.mem fn.closed b)
 
@@ -553,7 +555,7 @@ let emit_call fn result ext (ret : Low.ty) callee args =
   let fixed = match callee with Direct n -> Hashtbl.find_opt fn.mc.variadic n | Indirect _ -> None in
   let nfixed = match fixed with Some k -> k | None -> List.length args in
   let param_abis = List.filteri (fun k _ -> k < nfixed) (List.map (fun (t, e, _) -> abi lay t e) args) in
-  let sig_ = { param_abis; result_abis = result_abis lay ret ext; variadic = fixed <> None } in
+  let sig_ = { param_abis; result_abis = result_abis lay ret ext; variadic = fixed <> None; ms_abi = false; ms_xmm_result = false } in
   let argv = Array.of_list (List.map (fun (_, _, v) -> value fn v) args) in
   (* a struct through `...` names its agg ABI on the call (SPEC §5) *)
   let va_aggs =
@@ -825,7 +827,7 @@ let little_endian size (x : int64) =
 
 let base_global gname size galign =
   { gname; glinkage = Local; gvisibility = Default; section = None; galign = max 1 galign;
-    readonly = true; thread_local = false; size; init = None; gdefined = true }
+    readonly = true; thread_local = false; size; init = None; gcommon = false; gdefined = true }
 
 (* string literal [index]'s bytes, as global .str.<index> *)
 let string_global mc index bytes =

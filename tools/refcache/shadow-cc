@@ -1,0 +1,29 @@
+#!/usr/bin/env python3
+"""PATH adapter for fixture compilers invoked by the linker integration tests."""
+
+import os
+from pathlib import Path
+import sys
+
+# The link name selects the real compiler. Strip this adapter directory before
+# resolving the compiler and running its children.
+name = Path(sys.argv[0]).name
+wrapper_dir = Path(sys.argv[0]).absolute().parent
+os.environ["PATH"] = os.pathsep.join(
+    path for path in os.get_exec_path() if Path(path).absolute() != wrapper_dir
+)
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from compiler import compile_command
+from linker import shadow_scratch
+from refcache import Cache
+
+argv = [name, *sys.argv[1:]]
+result = None
+if (Cache().root is not None and not os.environ.get("LD_PRELOAD")
+        and any(Path(arg).suffix in (".c", ".s", ".S") and Path(arg).is_file() for arg in argv[1:])):
+    result = compile_command(argv, ns="shadow/fixture-cc", scratch=shadow_scratch(argv[1:]))
+if result is None:
+    os.execvp(name, argv)
+sys.stdout.buffer.write(result.stdout)
+sys.stderr.buffer.write(result.stderr)
+raise SystemExit(result.returncode if result.returncode >= 0 else 128 - result.returncode)

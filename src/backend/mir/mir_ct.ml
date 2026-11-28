@@ -104,7 +104,7 @@ let join into s =
 (* instructions that set the flags (from their operands); those that keep
    them when a count is zero also keep the old taint *)
 let sets_flags = function
-  | Alu _ | Alui _ | Test _ | Imul _ | Neg _ | Bsf _ | Bsr _ | Mul1 _ | Div _ | Ucomi _
+  | Alu _ | Alui _ | Test _ | Imul _ | Neg _ | Bsf _ | Bsr _ | Mul1 _ | Div _ | Ucomi _ | Comi _
   | Xadd _ | Cmpxchg _ | Cmpxchg16b _ ->
       `Set
   | Shift _ | Shd _ | Shifti _ -> `Merge
@@ -162,7 +162,7 @@ let run (f : func) (ra : Mir_ra.result) =
             bad after "atomic operand" u
         | Div _ -> bad after "operand of a division" u
         | Bsf _ | Bsr _ -> bad after "operand of bsf or bsr" u
-        | Fop _ | Fsqrt _ | Ucomi _ | Cvtsi _ | Cvttsi _ | Cvtff _ ->
+        | Fop _ | Fsqrt _ | Ucomi _ | Comi _ | Cvtsi _ | Cvttsi _ | Cvtff _ ->
             bad after "float operand" u
         | Call { target = Treg r; _ } -> bad after "call target" [ r ]
         | Syscall _ -> bad after "syscall argument" u

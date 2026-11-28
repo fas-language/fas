@@ -41,6 +41,7 @@ type base =
   | Bout  (** the outgoing argument area at rsp *)
   | Bin  (** the incoming stack arguments, at rbp + 16 *)
   | Bsym of string  (** rip-relative to a symbol; never with an index *)
+  | Babs of string  (** a sign-extended link-time symbol address *)
 
 type addr = { base : base; index : reg option; scale : int; disp : int }
 
@@ -73,6 +74,7 @@ type x87 =
   | Fremloop  (** st0 = fmod(st0, st1) by an fprem loop; clobbers rax and the flags *)
   | Fsqrt87
   | Fucomip  (** flags as ucomis for st0 vs st1, pop *)
+  | Fcomip  (** like Fucomip, raising invalid for quiet NaNs too *)
   | Fpop
   | Fnstcw of addr
   | Fldcw of addr
@@ -81,7 +83,8 @@ type x87 =
    register is physical (instruction selection chose them, see
    Mir_isel's asm rule) *)
 type asm_opnd =
-  | Areg of reg * int  (** a register and the operand's width in bits (an xmm: 32 or 64) *)
+  | Areg of reg * int  (** a register and the operand's width in bits (an xmm: 32, 64 or 128) *)
+  | Ax87 of int  (** x87 stack slot: 0 = st(0), 1 = st(1) *)
   | Amem of addr * int  (** a memory operand and its size in bytes *)
   | Aimm of int64  (** an immediate *)
   | Asym of string * int64  (** a symbol plus an addend, as an immediate *)
@@ -133,6 +136,7 @@ type ins =
   | Fop of X64.fop * bool * reg * reg  (** dst op= src (scalar, double?) *)
   | Fsqrt of bool * reg * reg  (** dst = sqrt src *)
   | Ucomi of bool * reg * reg
+  | Comi of bool * reg * reg
   | Movgx of bool * reg * reg  (** xmm dst = the low 64 (true) / 32 bits of a GPR *)
   | Movxg of bool * reg * reg  (** GPR dst = the low 64 / 32 bits of an xmm (zero-extended) *)
   | Cvtsi of bool * reg * reg  (** xmm dst = float of a signed 64-bit GPR *)
@@ -194,6 +198,8 @@ type home =
 
 type func = {
   name : string;
+  ms_abi : bool;
+  ms_save_xmm : bool;
   vcls : rc Dynarray.t;  (** class of each virtual register *)
   blocks : block Dynarray.t;  (** block 0 is the entry *)
   slots : (int * int) Dynarray.t;  (** frame slots: size, alignment *)
@@ -209,8 +215,8 @@ type func = {
           registers other than the results (Mir_ra, Mir_emit) *)
 }
 
-let create name =
-  { name; vcls = Dynarray.create (); blocks = Dynarray.create (); slots = Dynarray.create (); out_size = 0; homes = []; marks = Hashtbl.create 1; zeroize = false }
+let create ?(ms_abi = false) ?(no_sse = false) name =
+  { name; ms_abi; ms_save_xmm = ms_abi && not no_sse; vcls = Dynarray.create (); blocks = Dynarray.create (); slots = Dynarray.create (); out_size = 0; homes = []; marks = Hashtbl.create 1; zeroize = false }
 
 let new_vreg f cls =
   Dynarray.add_last f.vcls cls;
@@ -241,7 +247,7 @@ let uses_defs = function
   | Spset s -> ([ s ], [])
   | Load (_, _, d, a) | Fload (_, d, a) | Xload (d, a) | Lea (d, a) -> (addr_regs a, [ d ])
   | Store (_, a, s) | Fstore (_, a, s) | Xstore (a, s) -> (s :: addr_regs a, [])
-  | Alu (X64.Cmp, x, y) | Test (x, y) | Ucomi (_, x, y) -> ([ x; y ], [])
+  | Alu (X64.Cmp, x, y) | Test (x, y) | Ucomi (_, x, y) | Comi (_, x, y) -> ([ x; y ], [])
   | Alu (_, d, s) | Imul (d, s) | Cmov (_, d, s) | Fop (_, _, d, s) -> ([ d; s ], [ d ])
   | Alui (X64.Cmp, x, _) -> ([ x ], [])
   | Alui (_, d, _) | Shifti (_, d, _) | Neg d | Not d | Bswap d -> ([ d ], [ d ])
@@ -332,6 +338,7 @@ let map_regs g ins =
   | Fop (op, dbl, d, s) -> Fop (op, dbl, g d, g s)
   | Fsqrt (dbl, d, s) -> Fsqrt (dbl, g d, g s)
   | Ucomi (dbl, x, y) -> Ucomi (dbl, g x, g y)
+  | Comi (dbl, x, y) -> Comi (dbl, g x, g y)
   | Movgx (dbl, d, s) -> Movgx (dbl, g d, g s)
   | Movxg (dbl, d, s) -> Movxg (dbl, g d, g s)
   | Cvtsi (dbl, d, s) -> Cvtsi (dbl, g d, g s)
@@ -495,7 +502,8 @@ let addr_s a =
     | Bslot s -> [ Printf.sprintf "slot%d" s ]
     | Bout -> [ "out" ]
     | Bin -> [ "in" ]
-    | Bsym s -> [ "@" ^ s ])
+    | Bsym s -> [ "@" ^ s ]
+    | Babs s -> [ "abs @" ^ s ])
     @ (match a.index with Some r -> [ Printf.sprintf "%s*%d" (reg_s r) a.scale ] | None -> [])
     @ if a.disp <> 0 then [ string_of_int a.disp ] else []
   in
@@ -551,6 +559,7 @@ let ins_s i =
   | Fop (op, dbl, a, b) -> p "%s%s %s, %s" (fop_s op) (d dbl) (r a) (r b)
   | Fsqrt (dbl, a, b) -> p "%s = sqrt%s %s" (r a) (d dbl) (r b)
   | Ucomi (dbl, a, b) -> p "ucomi%s %s, %s" (d dbl) (r a) (r b)
+  | Comi (dbl, a, b) -> p "comi%s %s, %s" (d dbl) (r a) (r b)
   | Movgx (dbl, a, b) -> p "%s = movgx%s %s" (r a) (d dbl) (r b)
   | Movxg (dbl, a, b) -> p "%s = movxg%s %s" (r a) (d dbl) (r b)
   | Cvtsi (dbl, a, b) -> p "%s = cvtsi2%s %s" (r a) (d dbl) (r b)
@@ -566,6 +575,7 @@ let ins_s i =
       | Fremloop -> "fprem loop"
       | Fsqrt87 -> "fsqrt"
       | Fucomip -> "fucomip"
+      | Fcomip -> "fcomip"
       | Fpop -> "fpop"
       | Fnstcw m -> p "fnstcw %s" (addr_s m)
       | Fldcw m -> p "fldcw %s" (addr_s m))
@@ -594,6 +604,7 @@ let ins_s i =
   | Asm a ->
       let o = function
         | Areg (x, w) -> p "%s:%d" (r x) w
+        | Ax87 i -> p "st(%d)" i
         | Amem (m, n) -> p "%s:%d" (addr_s m) n
         | Aimm k -> Int64.to_string k
         | Asym (s, k) -> p "@%s%+Ld" s k

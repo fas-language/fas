@@ -23,7 +23,53 @@ type tok =
   | P of string  (** punctuation: ( ) [ ] { } < > , : = * + -> ... *)
   | Eof
 
-type lexer = { s : string; mutable pos : int; mutable line : int; mutable peeked : tok option }
+type source =
+  | Text of string
+  | Channel of { ch : in_channel; mutable buf : bytes; mutable start : int; mutable len : int }
+
+type lexer = {
+  source : source;
+  mutable pos : int;
+  mutable line : int;
+  mutable keep : int;
+  mutable peeked : (tok * int) list;
+}
+
+let lexer source = { source; pos = 0; line = 1; keep = 0; peeked = [] }
+
+(* Channel input keeps the current token only. [keep] pins the beginning
+   of a name or number if it straddles the end of the buffer. *)
+let available lx pos =
+  match lx.source with
+  | Text s -> pos < String.length s
+  | Channel c ->
+      if pos < c.start + c.len then true
+      else begin
+        let pinned = max 0 (min lx.keep lx.pos - c.start) in
+        let len = c.len - pinned in
+        if len + 3 >= Bytes.length c.buf then begin
+          let b = Bytes.create (2 * Bytes.length c.buf) in
+          Bytes.blit c.buf pinned b 0 len;
+          c.buf <- b
+        end
+        else Bytes.blit c.buf pinned c.buf 0 len;
+        c.start <- c.start + pinned;
+        c.len <- len;
+        let rec fill () =
+          let n = input c.ch c.buf c.len (Bytes.length c.buf - c.len) in
+          c.len <- c.len + n;
+          pos < c.start + c.len || (n <> 0 && fill ())
+        in
+        fill ()
+      end
+
+let byte lx pos =
+  match lx.source with Text s -> s.[pos] | Channel c -> Bytes.get c.buf (pos - c.start)
+
+let substring lx pos len =
+  match lx.source with
+  | Text s -> String.sub s pos len
+  | Channel c -> Bytes.sub_string c.buf (pos - c.start) len
 
 let fail lx msg = raise (Error (lx.line, msg))
 
@@ -35,19 +81,19 @@ let read_quoted lx =
   (* the opening quote is at lx.pos *)
   lx.pos <- lx.pos + 1;
   let b = Buffer.create 16 in
-  let n = String.length lx.s in
   let rec go () =
-    if lx.pos >= n then fail lx "unterminated string";
-    match lx.s.[lx.pos] with
+    lx.keep <- lx.pos;
+    if not (available lx lx.pos) then fail lx "unterminated string";
+    match byte lx lx.pos with
     | '"' -> lx.pos <- lx.pos + 1
     | '\\' ->
-        if lx.pos + 1 >= n then fail lx "bad escape";
-        (match lx.s.[lx.pos + 1] with
+        if not (available lx (lx.pos + 1)) then fail lx "bad escape";
+        (match byte lx (lx.pos + 1) with
         | '"' -> Buffer.add_char b '"'; lx.pos <- lx.pos + 2
         | '\\' -> Buffer.add_char b '\\'; lx.pos <- lx.pos + 2
         | _ ->
-            if lx.pos + 2 >= n then fail lx "bad escape";
-            let h = String.sub lx.s (lx.pos + 1) 2 in
+            if not (available lx (lx.pos + 2)) then fail lx "bad escape";
+            let h = substring lx (lx.pos + 1) 2 in
             (match int_of_string_opt ("0x" ^ h) with
             | Some c -> Buffer.add_char b (Char.chr c)
             | None -> fail lx "bad escape");
@@ -63,20 +109,20 @@ let read_quoted lx =
   Buffer.contents b
 
 let read_name lx =
-  let n = String.length lx.s in
-  if lx.pos < n && lx.s.[lx.pos] = '"' then read_quoted lx
+  if available lx lx.pos && byte lx lx.pos = '"' then read_quoted lx
   else begin
     let st = lx.pos in
-    while lx.pos < n && is_ident_char lx.s.[lx.pos] do lx.pos <- lx.pos + 1 done;
+    lx.keep <- st;
+    while available lx lx.pos && is_ident_char (byte lx lx.pos) do lx.pos <- lx.pos + 1 done;
     if lx.pos = st then fail lx "expected a name";
-    String.sub lx.s st (lx.pos - st)
+    substring lx st (lx.pos - st)
   end
 
 let rec lex lx =
-  let n = String.length lx.s in
-  if lx.pos >= n then Eof
+  lx.keep <- lx.pos;
+  if not (available lx lx.pos) then Eof
   else
-    match lx.s.[lx.pos] with
+    match byte lx lx.pos with
     | ' ' | '\t' | '\r' ->
         lx.pos <- lx.pos + 1;
         lex lx
@@ -86,24 +132,27 @@ let rec lex lx =
         lex lx
     | ';' ->
         (* comment to end of line *)
-        while lx.pos < n && lx.s.[lx.pos] <> '\n' do lx.pos <- lx.pos + 1 done;
+        while available lx lx.pos && byte lx lx.pos <> '\n' do
+          lx.pos <- lx.pos + 1;
+          lx.keep <- lx.pos
+        done;
         lex lx
     | '"' -> Str (read_quoted lx)
     | '%' -> lx.pos <- lx.pos + 1; Tlocal (read_name lx)
     | '@' -> lx.pos <- lx.pos + 1; Sym (read_name lx)
     | '^' -> lx.pos <- lx.pos + 1; Label (read_name lx)
     | '!' -> lx.pos <- lx.pos + 1; Bang (read_name lx)
-    | '-' when lx.pos + 1 < n && lx.s.[lx.pos + 1] = '>' -> lx.pos <- lx.pos + 2; P "->"
-    | '.' when lx.pos + 2 < n && lx.s.[lx.pos + 1] = '.' && lx.s.[lx.pos + 2] = '.' ->
+    | '-' when available lx (lx.pos + 1) && byte lx (lx.pos + 1) = '>' -> lx.pos <- lx.pos + 2; P "->"
+    | '.' when available lx (lx.pos + 2) && byte lx (lx.pos + 1) = '.' && byte lx (lx.pos + 2) = '.' ->
         lx.pos <- lx.pos + 3;
         P "..."
     | '-' | '0' .. '9' ->
         let st = lx.pos in
         lx.pos <- lx.pos + 1;
-        while lx.pos < n && (match lx.s.[lx.pos] with '0' .. '9' | 'a' .. 'f' | 'A' .. 'F' | 'x' -> true | _ -> false) do
+        while available lx lx.pos && (match byte lx lx.pos with '0' .. '9' | 'a' .. 'f' | 'A' .. 'F' | 'x' -> true | _ -> false) do
           lx.pos <- lx.pos + 1
         done;
-        Num (String.sub lx.s st (lx.pos - st))
+        Num (substring lx st (lx.pos - st))
     | '(' | ')' | '[' | ']' | '{' | '}' | '<' | '>' | ',' | ':' | '=' | '*' | '+' as c ->
         lx.pos <- lx.pos + 1;
         P (String.make 1 c)
@@ -112,16 +161,27 @@ let rec lex lx =
 
 let peek lx =
   match lx.peeked with
-  | Some t -> t
-  | None ->
+  | (t, line) :: _ -> lx.line <- line; t
+  | [] ->
       let t = lex lx in
-      lx.peeked <- Some t;
+      lx.peeked <- [ (t, lx.line) ];
       t
 
 let next lx =
   let t = peek lx in
-  lx.peeked <- None;
+  lx.peeked <- List.tl lx.peeked;
   t
+
+let peek2 lx =
+  let t = peek lx in
+  match lx.peeked with
+  | [ _; (q, _) ] -> q
+  | _ ->
+      let line = lx.line in
+      let q = lex lx in
+      lx.peeked <- [ (t, line); (q, lx.line) ];
+      lx.line <- line;
+      q
 
 let tok_text = function
   | Ident s -> s | Num s -> s | Str s -> "\"" ^ s ^ "\"" | Tlocal s -> "%" ^ s
@@ -328,6 +388,8 @@ and parse_agg lx =
       Agg { size; align; fields = List.rev !fields }
 
 let parse_sig lx =
+  let ms_abi = accept_ident lx "ms_abi" in
+  let ms_xmm_result = ms_abi && accept_ident lx "xmm_result" in
   expect lx "(";
   let params = ref [] and variadic = ref false in
   if not (accept lx ")") then begin
@@ -347,7 +409,7 @@ let parse_sig lx =
     in
     go ()
   end;
-  { param_abis = List.rev !params; result_abis = List.rev !results; variadic = !variadic }
+  { param_abis = List.rev !params; result_abis = List.rev !results; variadic = !variadic; ms_abi; ms_xmm_result }
 
 (* ---------- function bodies ---------- *)
 
@@ -355,7 +417,7 @@ type fstate = {
   f : func;
   lx : lexer;
   vals : (string, value) Hashtbl.t;  (** names seen so far *)
-  defined : (string, unit) Hashtbl.t;  (** names with a definition *)
+  keep_value_names : bool;
   blocks : (string, block) Hashtbl.t;
   bdefined : (string, unit) Hashtbl.t;
   mutable pending_keys : string array option;
@@ -382,13 +444,13 @@ let use_name st name =
 
 (* Binds %name to the newly defined value [v] *)
 let define_name st name v =
-  if Hashtbl.mem st.defined name then fail st.lx ("%" ^ name ^ " defined twice");
-  Hashtbl.replace st.defined name ();
   (match Hashtbl.find_opt st.vals name with
-  | Some placeholder -> Vec.set st.f.defs placeholder (Alias v)
+  | Some placeholder when def_of st.f placeholder = Unset ->
+      Vec.set st.f.defs placeholder (Alias v)
+  | Some _ -> fail st.lx ("%" ^ name ^ " defined twice")
   | None -> ());
   Hashtbl.replace st.vals name v;
-  if not (Fir_print.is_numeric name) then Hashtbl.replace st.f.names v name
+  if st.keep_value_names && not (Fir_print.is_numeric name) then Hashtbl.replace st.f.names v name
 
 let rec parse_const_after_ty st ty =
   let lx = st.lx in
@@ -531,7 +593,7 @@ let asm_parts st =
   flags ();
   let tmpl = str_tok lx in
   (* an empty list may be left out *)
-  let operands kw ~output =
+  let operands kw ~output ~names =
     let present = match peek lx with Ident k when k = kw -> ignore (next lx); true | _ -> false in
     if present then expect lx "(";
     let ops = ref [] and args = ref [] in
@@ -548,12 +610,10 @@ let asm_parts st =
         let acon = str_tok lx in
         let aty = parse_ty lx in
         let c =
-          match Fir_asm.constr ~names:[||] ~nouts:(if output then 0 else max_int) ~output acon with
-          | c -> Some c
-          | exception Fir_asm.Bad _ when not output -> None (* a [name] tie: the verifier checks *)
-          | exception Fir_asm.Bad m -> fail lx m
+          try Fir_asm.constr ~names ~nouts:(Array.length names) ~output acon
+          with Fir_asm.Bad m -> fail lx m
         in
-        let takes = (not output) || match c with Some c -> Fir_asm.output_takes_arg c | None -> false in
+        let takes = (not output) || Fir_asm.output_takes_arg c in
         (* the value; a bare constant has the operand's type (ptr for a
            memory operand) *)
         if takes then begin
@@ -562,8 +622,7 @@ let asm_parts st =
             | Tlocal _ -> parse_value st
             | t when starts_ty t -> parse_value st
             | _ ->
-                parse_const_after_ty st
-                  (match c with Some c when Fir_asm.indirect c -> ptr | _ -> aty)
+                parse_const_after_ty st (if Fir_asm.indirect c then ptr else aty)
           in
           args := x :: !args
         end;
@@ -574,8 +633,9 @@ let asm_parts st =
     end;
     (Array.of_list (List.rev !ops), List.rev !args)
   in
-  let outs, oargs = operands "out" ~output:true in
-  let ins, iargs = operands "in" ~output:false in
+  let outs, oargs = operands "out" ~output:true ~names:[||] in
+  let names = Array.map (fun (o : asm_operand) -> o.aname) outs in
+  let ins, iargs = operands "in" ~output:false ~names in
   let clobbers =
     match peek lx with
     | Ident "clobber" ->
@@ -593,6 +653,17 @@ let asm_parts st =
     | _ -> [||]
   in
   (!aflags, tmpl, outs, oargs, ins, iargs, clobbers)
+
+let asm_result_tys st (outs : asm_operand array) =
+  let lx = st.lx in
+  let rtys = ref [] in
+  Array.iter
+    (fun (o : asm_operand) ->
+      match Fir_asm.constr ~names:[||] ~nouts:0 ~output:true o.acon with
+      | c -> if Fir_asm.output_is_result c then rtys := o.aty :: !rtys
+      | exception Fir_asm.Bad m -> fail lx m)
+    outs;
+  Array.of_list (List.rev !rtys)
 
 (* Parses the op after "name" (already consumed); returns the op and the
    result types *)
@@ -921,9 +992,10 @@ let parse_term st word =
       end;
       Indirect_br (x, Array.of_list (List.rev !bs))
   | "asm_goto" ->
-      (* asm_goto [volatile] [intel] "tmpl" in(...) clobber(...) ^fall [^l, ...] *)
-      let aflags, tmpl, outs, _, ins, iargs, clobbers = asm_parts st in
-      if outs <> [||] then fail lx "asm_goto has no outputs";
+      (* asm_goto [volatile] [intel] "tmpl" [out(...)] [in(...)] [clobber(...)] ^fall [^l, ...] *)
+      let aflags, tmpl, outs, oargs, ins, iargs, clobbers = asm_parts st in
+      let rtys = asm_result_tys st outs in
+      if rtys <> [||] then fail lx (Printf.sprintf "asm_goto defines %d values, 0 named" (Array.length rtys));
       let label () = match next lx with Label s -> block_ref st s | t -> fail lx ("expected a label, got " ^ tok_text t) in
       let fall = label () in
       expect lx "[";
@@ -935,7 +1007,18 @@ let parse_term st word =
         in
         go ()
       end;
-      Asm_goto { tmpl; aflags; ins; aargs = Array.of_list iargs; clobbers; fall; labels = Array.of_list (List.rev !bs) }
+      Asm_goto
+        {
+          tmpl;
+          aflags;
+          outs;
+          ins;
+          aargs = Array.of_list (oargs @ iargs);
+          aresults = [||];
+          clobbers;
+          fall;
+          labels = Array.of_list (List.rev !bs);
+        }
   | "ret" ->
       (* "ret" alone returns nothing; otherwise a value list follows on the
          same logical statement, which ends at the next label or "}" *)
@@ -954,9 +1037,9 @@ let is_term = function
   | _ -> false
 
 (* Parses "{ blocks }" into [f] *)
-let parse_body lx f =
+let parse_body ~keep_value_names lx f =
   let st =
-    { f; lx; vals = Hashtbl.create 64; defined = Hashtbl.create 64; blocks = Hashtbl.create 16;
+    { f; lx; vals = Hashtbl.create 64; keep_value_names; blocks = Hashtbl.create 16;
       bdefined = Hashtbl.create 16; pending_keys = None }
   in
   let switch_fixups = ref [] in
@@ -972,12 +1055,17 @@ let parse_body lx f =
         let vscope = if accept_ident lx "scope" then int_tok lx else 0 in
         let varg = if accept_ident lx "arg" then int_tok lx else 0 in
         let vloc = if (match peek lx with Bang "loc" -> true | _ -> false) then (ignore (next lx); int_tok lx) else 0 in
-        let home =
+        let home, vsymbol =
           if accept_ident lx "at" then
-            match next lx with Tlocal n -> Some (use_name st n) | t -> fail lx ("expected a value, got " ^ tok_text t)
-          else None
+            match next lx with
+            | Tlocal n -> (Some (use_name st n), None)
+            | Sym n -> (None, Some (n, accept_ident lx "tls"))
+            | t -> fail lx ("expected a variable home, got " ^ tok_text t)
+          else (None, None)
         in
-        f.vars <- f.vars @ [ { vname; vty; vscope; vloc; varg; home } ];
+        let vstack = accept_ident lx "stack" in
+        let vindirect = vstack && accept_ident lx "indirect" in
+        f.vars <- f.vars @ [ { vname; vty; vscope; vloc; varg; home; vstack; vindirect; vsymbol } ];
         blocks ()
     | Label name ->
         if Hashtbl.mem st.bdefined name then fail lx ("block ^" ^ name ^ " defined twice");
@@ -1019,14 +1107,51 @@ let parse_body lx f =
               done;
               expect lx "=";
               let opname = match next lx with Ident s -> s | t -> fail lx ("expected an instruction, got " ^ tok_text t) in
-              let op, tys = parse_op st opname in
               let names = Array.of_list (List.rev !names) in
-              if Array.length names <> Array.length tys then
-                fail lx (Printf.sprintf "%s defines %d values, %d named" opname (Array.length tys) (Array.length names));
-              let loc = if (match peek lx with Bang "loc" -> true | _ -> false) then (ignore (next lx); int_tok lx) else 0 in
-              let rs = emit ~loc f b op tys in
-              Array.iteri (fun k n -> define_name st n rs.(k)) names;
-              insts ()
+              if opname = "asm_goto" then begin
+                let aflags, tmpl, outs, oargs, ins, iargs, clobbers = asm_parts st in
+                let rtys = asm_result_tys st outs in
+                if Array.length names <> Array.length rtys then
+                  fail lx (Printf.sprintf "asm_goto defines %d values, %d named" (Array.length rtys) (Array.length names));
+                let label () =
+                  match next lx with Label s -> block_ref st s | t -> fail lx ("expected a label, got " ^ tok_text t)
+                in
+                let fall = label () in
+                expect lx "[";
+                let bs = ref [] in
+                if not (accept lx "]") then begin
+                  let rec go () =
+                    bs := label () :: !bs;
+                    if accept lx "," then go () else expect lx "]"
+                  in
+                  go ()
+                end;
+                let aresults = Array.mapi (fun k ty -> new_value f (Term_result (b, k)) ty) rtys in
+                Array.iteri (fun k n -> define_name st n aresults.(k)) names;
+                let loc = if (match peek lx with Bang "loc" -> true | _ -> false) then (ignore (next lx); int_tok lx) else 0 in
+                set_term ~loc f b
+                  (Asm_goto
+                     {
+                       tmpl;
+                       aflags;
+                       outs;
+                       ins;
+                       aargs = Array.of_list (oargs @ iargs);
+                       aresults;
+                       clobbers;
+                       fall;
+                       labels = Array.of_list (List.rev !bs);
+                     })
+              end
+              else begin
+                let op, tys = parse_op st opname in
+                if Array.length names <> Array.length tys then
+                  fail lx (Printf.sprintf "%s defines %d values, %d named" opname (Array.length tys) (Array.length names));
+                let loc = if (match peek lx with Bang "loc" -> true | _ -> false) then (ignore (next lx); int_tok lx) else 0 in
+                let rs = emit ~loc f b op tys in
+                Array.iteri (fun k n -> define_name st n rs.(k)) names;
+                insts ()
+              end
           | Ident opname ->
               let op, tys = parse_op st opname in
               if tys <> [||] then
@@ -1045,7 +1170,7 @@ let parse_body lx f =
   blocks ();
   (* every referenced block and value must be defined *)
   Hashtbl.iter (fun name _ -> if not (Hashtbl.mem st.bdefined name) then fail lx ("undefined block ^" ^ name)) st.blocks;
-  Hashtbl.iter (fun name _ -> if not (Hashtbl.mem st.defined name) then fail lx ("undefined value %" ^ name)) st.vals;
+  Hashtbl.iter (fun name v -> if def_of f v = Unset then fail lx ("undefined value %" ^ name)) st.vals;
   (* blocks were created on first reference; renumber them in text order so
      the entry block is block 0 and printing is stable *)
   let order = Array.of_list (List.rev !order) in
@@ -1069,7 +1194,10 @@ let parse_body lx f =
     f.blocks;
   Vec.iteri
     (fun nw (br : block_rec) ->
-      Array.iteri (fun k p -> Vec.set f.defs p (Param (nw, k))) br.params)
+      Array.iteri (fun k p -> Vec.set f.defs p (Param (nw, k))) br.params;
+      match br.term with
+      | Asm_goto { aresults; _ } -> Array.iteri (fun k r -> Vec.set f.defs r (Term_result (nw, k))) aresults
+      | _ -> ())
     f.blocks;
   resolve_all f;
   (* switch keys, now that value types are final *)
@@ -1088,32 +1216,48 @@ let parse_body lx f =
 
 let parse_linkage_vis_attrs lx =
   let linkage = ref Global and vis = ref Default and attrs = ref 0 and display = ref None in
-  let decl_loc = ref 0 in
+  let decl_loc = ref 0 and cleanup = ref None and code_section = ref None and patchable = ref None in
   let seen_linkage = ref false in
-  (* the token after the next one, without consuming either *)
-  let peek2 () =
-    let pos = lx.pos and line = lx.line and peeked = lx.peeked in
-    ignore (next lx);
-    let t = peek lx in
-    lx.pos <- pos;
-    lx.line <- line;
-    lx.peeked <- peeked;
-    t
-  in
   let rec go () =
     match peek lx with
     (* at most one linkage, and `global @x` is the next top-level global, not
        this declaration's linkage (a bodiless `declare` has no end marker) *)
     | Ident s
       when Option.is_some (linkage_of s) && (not !seen_linkage)
-           && (match peek2 () with Sym _ -> false | _ -> true) ->
+           && (match peek2 lx with Sym _ -> false | _ -> true) ->
         ignore (next lx);
         seen_linkage := true;
         linkage := Option.get (linkage_of s);
         go ()
     | Ident s when Option.is_some (visibility_of s) -> ignore (next lx); vis := Option.get (visibility_of s); go ()
     | Ident "display" -> ignore (next lx); display := Some (str_tok lx); go ()
+    | Ident "section" ->
+        ignore (next lx);
+        if Option.is_some !code_section then fail lx "duplicate function section";
+        let name = str_tok lx in
+        if name = "" || String.contains name '\000' then fail lx "invalid function section";
+        code_section := Some name;
+        go ()
+    | Ident "patchable" ->
+        ignore (next lx);
+        if Option.is_some !patchable then fail lx "duplicate patchable";
+        expect lx "(";
+        let n = int_tok lx in
+        expect lx ",";
+        let before = int_tok lx in
+        expect lx ")";
+        if n < 0 || before < 0 || before > n || n > 0xffff then
+          fail lx "patchable(N, M) needs 0 <= M <= N <= 65535";
+        patchable := Some (n, before);
+        go ()
     | Bang "loc" -> ignore (next lx); decl_loc := int_tok lx; go ()
+    | Bang "cleanup" ->
+        ignore (next lx);
+        if Option.is_some !cleanup then fail lx "duplicate !cleanup";
+        let pad = int_tok lx in
+        expect lx ",";
+        cleanup := Some (pad, int_tok lx);
+        go ()
     | Ident "memory" ->
         ignore (next lx);
         expect lx "(";
@@ -1130,7 +1274,7 @@ let parse_linkage_vis_attrs lx =
     | _ -> ()
   in
   go ();
-  (!linkage, !vis, !attrs, !display, !decl_loc)
+  (!linkage, !vis, !attrs, !display, !decl_loc, !cleanup, !code_section, !patchable)
 
 let parse_piece lx =
   match next lx with
@@ -1159,7 +1303,18 @@ let parse_piece lx =
       let block = int_tok lx in
       expect lx ")";
       Blockref { fn; block }
-  | t -> fail lx ("expected bytes, zeros, reloc or blockaddr, got " ^ tok_text t)
+  | Ident "blockdiff" ->
+      expect lx "(";
+      let fn = match next lx with Sym s -> s | t -> fail lx ("expected a symbol, got " ^ tok_text t) in
+      expect lx ",";
+      let lhs = int_tok lx in
+      expect lx ",";
+      let rhs = int_tok lx in
+      expect lx ",";
+      let width = int_tok lx in
+      expect lx ")";
+      Blockdiff { fn; lhs; rhs; width }
+  | t -> fail lx ("expected bytes, zeros, reloc, blockaddr or blockdiff, got " ^ tok_text t)
 
 (* the body of "dtype N ..." after the id; type ids are checked by the verifier *)
 let parse_dtype lx =
@@ -1171,7 +1326,8 @@ let parse_dtype lx =
         let n = str_tok lx in
         let t = int_tok lx in
         let o = int_tok lx in
-        ms := (n, t, o) :: !ms;
+        let bits = if accept_ident lx "bits" then Some (int_tok lx) else None in
+        ms := { member_name = n; member_type = t; member_offset = o; member_bits = bits } :: !ms;
         if accept lx "," then go () else expect lx "}"
       in
       go ()
@@ -1208,6 +1364,15 @@ let parse_dtype lx =
       let t = int_tok lx in
       expect_ident lx "count";
       Dvector (t, int_tok lx)
+  | Ident "subroutine" ->
+      let result = int_tok lx in
+      expect lx "{";
+      let rec params rev =
+        let rev = int_tok lx :: rev in
+        if accept lx "," then params rev else (expect lx "}"; List.rev rev)
+      in
+      let parameters = if accept lx "}" then [] else params [] in
+      Dsubroutine (result, parameters, accept_ident lx "variadic")
   | Ident "typedef" ->
       let name = str_tok lx in
       Dtypedef (name, int_tok lx)
@@ -1227,13 +1392,15 @@ let parse_dtype lx =
       Denum { name; base; enumerators = List.rev !es }
   | t -> fail lx ("expected a debug type, got " ^ tok_text t)
 
-let parse_module s =
-  let lx = { s; pos = 0; line = 1; peeked = None } in
+let parse_module_with ?(keep_value_names = true) lx on_func =
   let m = create_module () in
   let rec go () =
     match next lx with
     | Eof -> ()
     | Ident "triple" -> m.triple <- str_tok lx; go ()
+    | Ident "discardable" ->
+        let name = match next lx with Sym s -> s | t -> fail lx ("expected a symbol, got " ^ tok_text t) in
+        Hashtbl.replace m.discardable name (); go ()
     | Ident "module_asm" -> m.module_asm <- m.module_asm @ [ str_tok lx ]; go ()
     | Ident "strict_aliasing" ->
         (match next lx with
@@ -1259,6 +1426,15 @@ let parse_module s =
         if parent < 0 || parent >= i then fail lx "a scope's parent must be 0 or an earlier scope";
         ignore (add_scope m ~parent);
         go ()
+    | Ident "dglobal" ->
+        let vname = str_tok lx in
+        let vty = int_tok lx in
+        let vloc = int_tok lx in
+        let name = match next lx with Sym n -> n | t -> fail lx ("expected a variable symbol, got " ^ tok_text t) in
+        let vsymbol = Some (name, accept_ident lx "tls") in
+        m.dglobals <- { vname; vty; vloc; vsymbol; vscope = 0; varg = 0; home = None;
+                        vstack = false; vindirect = false } :: m.dglobals;
+        go ()
     | Ident "dtype" ->
         let i = int_tok lx in
         if i <> Vec.length m.dtypes then fail lx "debug type ids must be consecutive from 1";
@@ -1279,7 +1455,7 @@ let parse_module s =
         let galign = int_tok lx in
         let g =
           { gname; glinkage = Global; gvisibility = Default; section = None; galign; readonly = false;
-            thread_local = false; size; init = None; gdefined = true }
+            thread_local = false; size; init = None; gcommon = false; gdefined = true }
         in
         let rec attrs () =
           match next lx with
@@ -1294,6 +1470,10 @@ let parse_module s =
         attrs ();
         (match next lx with
         | Ident "zero" -> ()
+        | Ident "common" ->
+            if g.glinkage <> Global || g.section <> None || g.thread_local || g.readonly then
+              fail lx "common globals require writable global linkage without a section or TLS";
+            g.gcommon <- true
         | Ident "extern" -> g.gdefined <- false
         | P "{" ->
             let ps = ref [] in
@@ -1324,19 +1504,44 @@ let parse_module s =
         let addend = match peek lx with P "+" -> ignore (next lx); int64_tok lx | _ -> 0L in
         ignore (Vec.push m.aliases { a with target; addend });
         go ()
+    | Ident "ifunc" ->
+        (* ifunc @name [linkage] [visibility] = @resolver *)
+        let iname = match next lx with Sym s -> s | t -> fail lx ("expected a symbol, got " ^ tok_text t) in
+        let iv = { iname; resolver = ""; ilinkage = Global; ivisibility = Default } in
+        let rec attrs () =
+          match next lx with
+          | Ident s when Option.is_some (linkage_of s) -> iv.ilinkage <- Option.get (linkage_of s); attrs ()
+          | Ident s when Option.is_some (visibility_of s) -> iv.ivisibility <- Option.get (visibility_of s); attrs ()
+          | P "=" -> ()
+          | t -> fail lx ("unexpected " ^ tok_text t ^ " in ifunc")
+        in
+        attrs ();
+        let resolver = match next lx with Sym s -> s | t -> fail lx ("expected the resolver symbol, got " ^ tok_text t) in
+        ignore (Vec.push m.ifuncs { iv with resolver });
+        go ()
     | Ident (("func" | "declare") as kw) ->
         let name = match next lx with Sym s -> s | t -> fail lx ("expected a symbol, got " ^ tok_text t) in
         let sig_ = parse_sig lx in
-        let linkage, vis, attrs, display, decl_loc = parse_linkage_vis_attrs lx in
+        let linkage, vis, attrs, display, decl_loc, cleanup, code_section, patchable = parse_linkage_vis_attrs lx in
+        if kw = "declare" && Option.is_some code_section then fail lx "a declaration has no code section";
+        if kw = "declare" && Option.is_some patchable then fail lx "a declaration has no patchable entry";
         let f = new_func ~linkage ~defined:(kw = "func") name sig_ in
         f.visibility <- vis;
         f.fattrs <- attrs;
+        f.code_section <- code_section;
+        f.patchable <- patchable;
+        f.unwind_cleanup <- cleanup;
         f.display <- display;
         f.decl_loc <- decl_loc;
-        if kw = "func" then parse_body lx f;
-        add_func m f;
+        if kw = "func" then parse_body ~keep_value_names lx f;
+        on_func m f;
         go ()
     | t -> fail lx ("unexpected " ^ tok_text t ^ " at top level")
   in
   go ();
   m
+
+let parse_module s = parse_module_with (lexer (Text s)) add_func
+
+let read_module ?(keep_value_names = true) ch on_func =
+  parse_module_with ~keep_value_names (lexer (Channel { ch; buf = Bytes.create 65536; start = 0; len = 0 })) on_func

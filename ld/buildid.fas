@@ -184,7 +184,7 @@ fn build_id_prepare() void fails {
 }
 
 fn build_id_emit() void fails {
-    if ld.build_id_file == NONE64 { return }
+    if ld.build_id_file == NONE64 || (config().has_script && !kept(ld.build_id_file, 1)) { return }
     at u64 = (try get_placement(ld.build_id_file, 1)).offset + 16
     digest(config().build_id == BUILD_ID_SHA1, ld.image, ld.image_size, ld.image + at)
 }

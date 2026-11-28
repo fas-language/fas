@@ -51,7 +51,7 @@ copies the native executable as `fas-ld`; it does not install an OCaml library A
 | Area | Current support |
 | --- | --- |
 | Inputs | Regular ELF64 little-endian x86-64 ET_REL objects; System V or Linux ABI version zero; GNU/SysV regular and thin archives, 32/64-bit indexes and GNU long names |
-| Output | Relocatable ET_REL; static ET_EXEC and CRT-relocated static PIE; dynamic ET_EXEC, loader-backed PIE and shared-library ET_DYN, 4 KiB load-page alignment for final images |
+| Output | Relocatable ET_REL; static ET_EXEC and CRT-relocated static PIE; dynamic ET_EXEC, loader-backed PIE and shared-library ET_DYN, 4 KiB load-page alignment for final images by default (`-z max-page-size=N` sets a power of two up to 1 GiB) |
 | Sections | PROGBITS, allocatable NOBITS, init/fini/preinit arrays, GNU Linux ABI/property notes, SystemTap v3 probe notes, validated groups/COMDAT and merge flags; input alignment preserved; conservative read-only whole-section deduplication |
 | Symbols | Local, strong and weak globals; section-relative, absolute and global common; NOTYPE, OBJECT, FUNC, SECTION, FILE, COMMON, TLS, GNU_IFUNC; default/protected/hidden/internal visibility |
 | Relocations | RELA: `R_X86_64_NONE`, `64`, `PC32`, `PC64`, `PLT32`, `32`, `32S`, `GOTPCREL`, `GOTPCRELX`, `REX_GOTPCRELX`, `GOTPC32`, `GOTPC64` |

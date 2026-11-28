@@ -21,10 +21,11 @@
    _start gets an FDE whose return address is undefined: unwinders stop
    there.
 
-   One CIE ("zR", pointers pc-relative sdata4) and one FDE per function.
+   One FDE per function references a CIE for ordinary ("zR") or cleanup
+   ("zPLR") frames, with PC-relative sdata4 pointers.
    pc_begin is a 32-bit PC-relative relocation against a local symbol at
-   the start of .text (not the function's own symbol: a weak function may
-   be overridden, and its FDE must still describe this copy). *)
+   the start of the code section. A weak function may be overridden, and
+   its FDE must still describe this copy. *)
 
 module A = X64
 
@@ -35,17 +36,30 @@ let dwarf_reg = function
 
 let ra_reg = 16
 let text_symbol = ".Lfas.text"
+let lsda_symbol = ".Lfas.lsda"
+let personality_slot = ".Lfas.personality"
+let personality = "__gcc_personality_v0"
 
 (* what happened at a text offset inside a function *)
 type event =
   | Pushed_rbp            (* after push rbp *)
   | Framed                (* after mov rbp, rsp *)
   | Saved of A.reg * int  (* after the i-th callee-saved push (0-based) *)
+  | Saved_xmm of int * int  (* xmm number and its downward offset from rbp *)
+  | Restored_xmm of int
   | Epilogue              (* before lea rsp, [rbp-..] of a return *)
   | Popped_rbp            (* after pop rbp *)
   | Returned              (* after ret, when code follows *)
+  | Inline of string * int (* assembler CFI program, advanced to this offset *)
 
-type fde = { start : int; size : int; events : (int * event) list (* offsets from start, in order *); entry : bool }
+type fde = {
+  code_base : string;
+  start : int;
+  size : int;
+  events : (int * event) list;  (* offsets from start, in order *)
+  entry : bool;
+  cleanup : (int * int) option;  (* landing pad and resume offsets from start *)
+}
 
 let uleb b n =
   let n = ref n in
@@ -105,33 +119,67 @@ let pad8 b from =
     u8 b 0
   done
 
-(* the .eh_frame bytes and their relocations *)
+(* The .eh_frame bytes and their relocations, plus the LSDA if any function
+   has a C cleanup. The pad consults frame slots to decide which lexical
+   cleanups are active. The call to _Unwind_Resume must have no landing pad
+   of its own, or forced unwinding would reenter this pad indefinitely. *)
 let build (fdes : fde list) =
   let b = Buffer.create 1024 and relocs = ref [] in
-  (* CIE *)
-  let cie = Buffer.length b in
-  u32 b 0 (* length, patched *);
-  u32 b 0 (* CIE id *);
-  u8 b 1 (* version *);
-  Buffer.add_string b "zR\000";
-  uleb b 1 (* code alignment *);
-  sleb b (-8) (* data alignment *);
-  uleb b ra_reg;
-  uleb b 1 (* augmentation data length *);
-  u8 b 0x1b (* FDE pointers: DW_EH_PE_pcrel | DW_EH_PE_sdata4 *);
-  def_cfa b 7 8 (* at a call: CFA = rsp+8 *);
-  offset b ra_reg 1 (* return address at CFA-8 *);
-  pad8 b cie;
-  let patches = ref [ (cie, Buffer.length b - cie - 4) ] in
+  let lsda = Buffer.create 32 and patches = ref [] in
+  let pcrel_to symbol displacement =
+    relocs := A.Rel32 { offset = Buffer.length b; symbol; addend = displacement + 4 } :: !relocs;
+    u32 b 0
+  in
+  let cie ~cleanup =
+    let at = Buffer.length b in
+    u32 b 0 (* length, patched *);
+    u32 b 0 (* CIE id *);
+    u8 b 1 (* version *);
+    Buffer.add_string b (if cleanup then "zPLR\000" else "zR\000");
+    uleb b 1 (* code alignment *);
+    sleb b (-8) (* data alignment *);
+    uleb b ra_reg;
+    uleb b (if cleanup then 7 else 1) (* augmentation data length *);
+    if cleanup then begin
+      u8 b 0x9b (* personality: indirect, pc-relative sdata4 *);
+      pcrel_to personality_slot 0;
+      u8 b 0x1b (* LSDA pointers: pc-relative sdata4 *)
+    end;
+    u8 b 0x1b (* FDE pointers: pc-relative sdata4 *);
+    def_cfa b 7 8;
+    offset b ra_reg 1;
+    pad8 b at;
+    patches := (at, Buffer.length b - at - 4) :: !patches;
+    at
+  in
+  let plain_cie = cie ~cleanup:false in
+  let cleanup_cie =
+    if List.exists (fun f -> Option.is_some f.cleanup) fdes then cie ~cleanup:true else plain_cie
+  in
   List.iter
     (fun f ->
       let at = Buffer.length b in
       u32 b 0 (* length, patched *);
+      let cie = if Option.is_some f.cleanup then cleanup_cie else plain_cie in
       u32 b (Buffer.length b - cie) (* CIE pointer: back from this field to the CIE *);
-      relocs := A.Rel32 { offset = Buffer.length b; symbol = text_symbol; addend = f.start + 4 } :: !relocs;
-      u32 b 0 (* pc_begin *);
+      pcrel_to f.code_base f.start (* pc_begin *);
       u32 b f.size (* pc_range *);
-      uleb b 0 (* augmentation data length *);
+      (match f.cleanup with
+      | None -> uleb b 0
+      | Some (landing, resume) ->
+          uleb b 4;
+          pcrel_to lsda_symbol (Buffer.length lsda);
+          u8 lsda 0xff (* omitted LPStart: use the start of the function *);
+          u8 lsda 0xff (* omitted type table: no catches *);
+          u8 lsda 0x01 (* call-site fields are ULEB128 *);
+          let sites = Buffer.create 16 in
+          let add_site start length pad =
+            uleb sites start; uleb sites length; uleb sites pad; uleb sites 0
+          in
+          add_site 0 resume landing;
+          add_site resume (f.size - resume) 0;
+          uleb lsda (Buffer.length sites);
+          Buffer.add_buffer lsda sites);
       if f.entry then undefined b ra_reg;
       let loc = ref 0 in
       List.iter
@@ -142,14 +190,18 @@ let build (fdes : fde list) =
           | Pushed_rbp -> def_cfa_offset b 16; offset b 6 2
           | Framed -> def_cfa_register b 6
           | Saved (r, i) -> offset b (dwarf_reg r) (3 + i)
+          | Saved_xmm (x, off) -> offset b (17 + x) ((off + 16) / 8)
+          | Restored_xmm x -> u8 b (0xc0 lor (17 + x))
           | Epilogue -> remember_state b
           | Popped_rbp -> def_cfa b 7 8
-          | Returned -> restore_state b)
+          | Returned -> restore_state b
+          | Inline (program, finish) -> Buffer.add_string b program; loc := finish)
         f.events;
       pad8 b at;
       patches := (at, Buffer.length b - at - 4) :: !patches)
     fdes;
-  u32 b 0 (* terminator *);
+  (* A partial link can concatenate these input sections. A terminator
+     between two inputs would hide the later FDEs from the final linker. *)
   let bytes = Buffer.to_bytes b in
   List.iter (fun (at, len) -> set_u32 bytes at len) !patches;
-  (bytes, List.rev !relocs)
+  ((bytes, List.rev !relocs), Buffer.to_bytes lsda)

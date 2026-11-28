@@ -39,6 +39,10 @@ struct Ld {
     sysroot Bytes
     has_root bool
 
+    // ld/lscript.fas — executable linker script
+    lscript Lscript
+    script_file u64
+
     // ld/verscript.fas — version script parser & policy cache
     vs_path Bytes
     vs_nodes Vec[VsNode]
@@ -175,6 +179,7 @@ struct Ld {
     lay_cursor u64
     lay_base u64
     lay_relro bool
+    lay_page u64                // -z max-page-size
     relro_seg Seg
     has_relro_seg bool
     tls_seg Seg
@@ -198,6 +203,7 @@ struct Ld {
     psyms Vec[Sym]
     pmaps addr
     psmaps addr
+    pbases addr                 // per file: u64 per section, its offset in its output section
 }
 
 thread var ld handle[Ld] = null
@@ -206,6 +212,7 @@ thread var ld handle[Ld] = null
 fn ld_init(ctx handle[Ld]) void {
     ctx.reading = true
     ctx.predefined_file = NONE64
+    ctx.script_file = NONE64
     ctx.module_base = NONE64
     ctx.unwind_file = NONE64
     ctx.property_file = NONE64

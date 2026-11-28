@@ -89,6 +89,10 @@ let evaluate f (ir : inst_rec) =
     let rt = ty_of f ir.results.(0) in
     match ir.op with
     | Ibin (k, _, a, b) -> ( match ibin f k a b with Some v -> Some v | None -> identity f k a b)
+    | Icmp ((Eq | Ne as k), a, b)
+      when is_ptr (ty_of f a) && (match const_of f a, const_of f b with
+          | Some (Cnull _ | Czero (Ptr _)), Some (Cnull _ | Czero (Ptr _)) -> true
+          | _ -> false) -> Some (iconst f i1 (if k = Eq then 1L else 0L))
     | Icmp (k, a, b) -> icmp f k a b
     | Conv ((Zext | Trunc), a) -> (
         match (int_const f a, rt) with Some (_, x), Int tw when tw <= 64 -> Some (iconst f rt (sext tw (mask tw x))) | _ -> None)
@@ -96,6 +100,11 @@ let evaluate f (ir : inst_rec) =
         match (int_const f a, rt) with
         | Some (w, x), Int tw when tw <= 64 -> Some (iconst f rt (sext tw (mask tw (sext w x))))
         | _ -> None)
+    | Conv (Inttoptr, a) when int_value f a = Some 0L ->
+        Some (const f (Cnull rt) rt)
+    | Conv (Ptrtoint, a)
+      when (match const_of f a with Some (Cnull _ | Czero (Ptr _)) -> true | _ -> false) ->
+        Some (iconst f rt 0L)
     (* a bitcast to its own type is a copy *)
     | Conv (Bitcast, a) when ty_of f (resolve f a) = rt -> Some a
     (* a byte address at offset zero is its base *)
@@ -164,12 +173,414 @@ let drop_params f =
       f.blocks
   end
 
-let fold_func f =
+(* Track ordinary nonescaped scalar slots along reachable control-flow
+   edges. A load may be replaced only when all incoming writes agree. A
+   memset of the whole slot to zero (-ftrivial-auto-var-init=zero on a local
+   declared without an initializer) is a known zero store: loads it reaches
+   become zero of their type. *)
+let forward_constants f live =
+  let slots = Hashtbl.create 16 in
+  Vec.iter (fun i ->
+    let ir = inst f i in
+    match ir.op with
+    | Alloca (n, align) ->
+        (match int_value f n with
+        | Some bytes when bytes > 0L ->
+            Hashtbl.add slots ir.results.(0) (bytes, align, ref [], ref false)
+        | _ -> ())
+    | _ -> ()) (block f entry).insts;
+  let invalidate v = Hashtbl.remove slots (resolve f v) in
+  let access b align p ty store =
+    match Hashtbl.find_opt slots p with
+    | Some (bytes, natural, events, _) when align <= natural && Int64.of_int (size_of ty) <= bytes ->
+        events := (b, store) :: !events
+    | _ -> invalidate p
+  in
+  Vec.iteri (fun b (br : block_rec) ->
+    if live.(b) then begin
+      Vec.iter (fun i ->
+        let ir = inst f i in
+        match ir.op with
+        | Store ({ volatile = false; order = Plain; align; _ }, v, p) ->
+            let p = resolve f p and v = resolve f v in
+            invalidate v;
+            let known = int_const f v <> None ||
+              (match const_of f v with Some (Cnull _ | Czero (Ptr _)) -> true | _ -> false)
+            in
+            if known then Option.iter (fun (_, _, _, found) -> found := true) (Hashtbl.find_opt slots p);
+            access b align p (ty_of f v) (`Store (if known then Some (`Value v) else None))
+        | Memset (false, p, byte, size)
+          when (match Hashtbl.find_opt slots (resolve f p) with
+                | Some (bytes, _, _, _) -> int_const f byte = Some (8, 0L) && int_value f size = Some bytes
+                | None -> false) ->
+            let _, _, events, found = Hashtbl.find slots (resolve f p) in
+            found := true;
+            events := (b, `Store (Some `Zero)) :: !events
+        | Load ({ volatile = false; order = Plain; align; _ }, p) ->
+            access b align (resolve f p) (ty_of f ir.results.(0)) (`Load ir)
+        | op -> iter_op_uses invalidate op) br.insts;
+      iter_term_uses invalidate br.term
+    end) f.blocks;
+  let changed = ref false in
+  let n = num_blocks f in
+  let edge_loads = Hashtbl.create 8 in
+  let predecessors = lazy (
+    let picks = Array.init n (fun b ->
+      match (block f b).term with Br _ -> b <> entry && Vec.length (block f b).insts <= 24 | _ -> false)
+    in
+    let preds = Array.make n [] in
+    Vec.iteri (fun b (br : block_rec) ->
+      if live.(b) then
+        List.iter (fun (t : target) ->
+          if picks.(t.dest) && t.dest <> b then preds.(t.dest) <- b :: preds.(t.dest)) (targets br.term))
+      f.blocks;
+    preds)
+  in
+  let as_constant ty = function
+    | Some (`Value v) when ty_of f v = ty -> Some v
+    | Some `Zero when (match ty with Int w -> w <= 64 | Ptr _ -> true | _ -> false) -> Some (zero f ty)
+    | _ -> None
+  in
+  Hashtbl.iter (fun _ (_, _, events, found) ->
+    if !found then begin
+      let stores = Hashtbl.create 8 in
+      List.iter (function
+        | b, `Store v when not (Hashtbl.mem stores b) -> Hashtbl.add stores b v
+        | _ -> ()) !events;
+      let incoming = Array.make n None in
+      let outgoing b =
+        match Hashtbl.find_opt stores b with
+        | Some last -> last
+        | None -> Option.get incoming.(b)
+      in
+      let pending = Queue.create () in
+      incoming.(entry) <- Some None;
+      Queue.add entry pending;
+      while not (Queue.is_empty pending) do
+        let b = Queue.take pending in
+        let outgoing = outgoing b in
+        List.iter (fun dest ->
+          let combined =
+            match incoming.(dest) with
+            | None -> outgoing
+            | Some old when old = outgoing -> old
+            | Some _ -> None
+          in
+          if incoming.(dest) <> Some combined then begin
+            incoming.(dest) <- Some combined;
+            Queue.add dest pending
+          end) (successors (block f b).term)
+      done;
+      let state = ref None and active = ref (-1) in
+      List.iter (fun (b, event) ->
+        if b <> !active then begin
+          active := b;
+          state := Option.get incoming.(b)
+        end;
+        match event with
+        | `Store v -> state := v
+        | `Load ir ->
+            let v = ir.results.(0) in
+            let ty = ty_of f v in
+            (match as_constant ty !state with
+            | Some c ->
+                replace_all_uses f v c;
+                ir.op <- Nop;
+                changed := true
+            | None when not (Hashtbl.mem stores b) ->
+                List.iter (fun pred ->
+                  Option.iter (fun c -> Hashtbl.add edge_loads (pred, b) (v, c))
+                    (as_constant ty (outgoing pred))) (Lazy.force predecessors).(b)
+            | _ -> ())) (List.rev !events)
+    end) slots;
+  !changed, edge_loads
+
+(* A private load can have a different constant on each incoming edge.
+   Bypass a short conditional block on edges where we can evaluate all its
+   instructions and resolve the branch. Values defined there must either
+   stay in the block or leave it as explicit successor arguments. *)
+let thread_stack_branches f live edge_loads =
+  if Hashtbl.length edge_loads = 0 then false else
+  let n = num_blocks f in
+  let owners = Array.make (num_values f) (-1) in
+  let define b v = if resolve f v = v then owners.(v) <- b in
+  Vec.iteri (fun b (br : block_rec) ->
+    Array.iter (define b) br.params;
+    Vec.iter (fun i -> Array.iter (define b) (inst f i).results) br.insts) f.blocks;
+  let used_outside = Array.make n false in
+  Vec.iteri (fun b (br : block_rec) ->
+    if live.(b) then begin
+      let use v =
+        let owner = owners.(resolve f v) in
+        if owner >= 0 && owner <> b then used_outside.(owner) <- true
+      in
+      Vec.iter (fun i -> iter_op_uses use (inst f i).op) br.insts;
+      iter_term_uses use br.term
+    end) f.blocks;
+  let thread pred t =
+    let b = t.dest in
+    let br = block f b in
+    match br.term, Hashtbl.find_all edge_loads (pred, b) with
+    | Br (c, yes, no, _), (_ :: _ as facts)
+      when not used_outside.(b) && Array.length br.params = Array.length t.args ->
+        let values = Hashtbl.create 8 in
+        let get v =
+          let v = resolve f v in
+          match Hashtbl.find_opt values v with
+          | Some v -> v
+          | None when owners.(v) <> b -> v
+          | None -> raise Exit
+        in
+        Array.iteri (fun k p -> if resolve f p = p then Hashtbl.add values p (resolve f t.args.(k))) br.params;
+        (try
+           Vec.iter (fun i ->
+             let ir = inst f i in
+             match ir.op with
+             | Nop -> ()
+             | _ ->
+                 let value =
+                   match ir.op with
+                   | Load _ -> List.assoc_opt ir.results.(0) facts
+                   | op -> evaluate f { ir with op = map_op_uses get op }
+                 in
+                 match value with
+                 | Some v -> Hashtbl.add values ir.results.(0) v
+                 | None -> raise Exit) br.insts;
+           match int_const f (get c) with
+           | Some (_, bits) ->
+               let dst = if bits = 0L then no else yes in
+               if dst.dest = b then t else { dst with args = Array.map get dst.args }
+           | None -> t
+         with Exit -> t)
+    | _ -> t
+  in
+  let edits = ref [] in
+  Vec.iteri (fun b (br : block_rec) ->
+    if live.(b) then begin
+      let edge = thread b in
+      let term =
+        match br.term with
+        | Jump t -> Jump (edge t)
+        | Br (c, yes, no, w) -> Br (c, edge yes, edge no, w)
+        | Switch (v, d, cases, w) ->
+            Switch (v, edge d, Array.map (fun (k, t) -> k, edge t) cases, w)
+        | term -> term
+      in
+      if term <> br.term then edits := (br, term) :: !edits
+    end) f.blocks;
+  List.iter (fun (br, term) -> br.term <- term) !edits;
+  !edits <> []
+
+(* Narrow a switch on a private stack field using an earlier equality
+   guard on that field. Stores to disjoint fields preserve the fact. A
+   pointer that escapes, or is indexed at an unknown offset, makes the
+   whole allocation ineligible. *)
+let narrow_stack_switches f live =
+  let switches = ref [] in
+  Vec.iteri (fun b (br : block_rec) ->
+    match br.term with
+    | Switch (v, _, _, _) when live.(b) && int_const f v = None ->
+        switches := (b, v) :: !switches
+    | _ -> ()) f.blocks;
+  if !switches = [] then false else
+  let allocas = Hashtbl.create 16 and addresses = Hashtbl.create 16 in
+  Vec.iter (fun i ->
+    let ir = inst f i in
+    match ir.op with
+    | Alloca (n, _) ->
+        (match int_const f n with
+        | Some (_, n) when n > 0L ->
+            let v = ir.results.(0) in
+            Hashtbl.add allocas v n;
+            Hashtbl.add addresses v (Some (v, 0L))
+        | _ -> ())
+    | _ -> ()) (block f entry).insts;
+  let rec address v =
+    let v = resolve f v in
+    if not (is_ptr (ty_of f v)) then None else
+    match Hashtbl.find_opt addresses v with
+    | Some p -> p
+    | None ->
+        let p =
+          match def_of f v with
+          | Result (i, _) ->
+              (match (inst f i).op with
+              | Ptradd (_, base, idx, scale, disp) ->
+                  (match address base, int_const f idx with
+                  | Some (a, off), Some (w, x) ->
+                      Some (a, Int64.(add off (add (mul (sext w x) (of_int scale)) (of_int disp))))
+                  | _ -> None)
+              | _ -> None)
+          | _ -> None
+        in
+        Hashtbl.add addresses v p;
+        p
+  in
+  let exposed = Hashtbl.create 8 in
+  let escape v = Option.iter (fun (a, _) -> Hashtbl.replace exposed a ()) (address v) in
+  let region ptr size =
+    match address ptr with
+    | Some (a, off) ->
+        let bytes = Hashtbl.find allocas a in
+        if off >= 0L && off <= bytes && size >= 0L && size <= Int64.sub bytes off then
+          Some (a, off, size)
+        else (escape ptr; None)
+    | None -> None
+  in
+  let loads = Hashtbl.create 16 and writes = Array.make (num_blocks f) [] in
+  let write b at ptr size v =
+    match region ptr size with
+    | Some loc when size > 0L -> writes.(b) <- (at, loc, v) :: writes.(b)
+    | _ -> ()
+  in
+  Vec.iteri (fun b (br : block_rec) ->
+    if live.(b) then begin
+      Vec.iteri (fun at i ->
+        let ir = inst f i in
+        match ir.op with
+        | Ptradd (_, p, idx, _, _) ->
+            if int_const f idx = None then escape p;
+            escape idx
+        | Load ({ volatile = false; order = Plain; _ }, p) ->
+            let v = ir.results.(0) in
+            (match ty_of f v with
+            | Int w when w <= 64 ->
+                let n = Int64.of_int (size_of (ty_of f v)) in
+                Option.iter (fun loc -> Hashtbl.add loads v (loc, w, b, at)) (region p n)
+            | _ -> ())
+        | Store ({ volatile = false; order = Plain; _ }, v, p) ->
+            escape v;
+            write b at p (Int64.of_int (size_of (ty_of f v)))
+              (Option.map (fun v -> `Scalar v) (int_const f v))
+        | Memset (false, p, byte, size) ->
+            (match int_const f byte, int_const f size with
+            | Some (8, 0L), Some (_, n) -> write b at p n (Some `Zero)
+            | _ -> escape p)
+        | op -> iter_op_uses escape op) br.insts;
+      iter_term_uses escape br.term
+    end) f.blocks;
+  let overlap (a, off, n) (b, start, size) =
+    a = b && off < Int64.add start size && start < Int64.add off n
+  in
+  (* The load must still describe the field at the edge being refined. *)
+  let read b v =
+    match Hashtbl.find_opt loads (resolve f v) with
+    | Some (((a, _, _) as loc), w, from, at) when b = from && not (Hashtbl.mem exposed a) &&
+        not (List.exists (fun (pos, dst, _) -> pos > at && overlap loc dst) writes.(b)) ->
+        Some (loc, w)
+    | _ -> None
+  in
+  let rec comparison b v =
+    match def_of f (resolve f v) with
+    | Result (i, _) ->
+        (match (inst f i).op with
+        | Conv (Zext, x) when ty_of f x = i1 -> comparison b x
+        | Icmp ((Eq | Ne as pred), x, y) ->
+            let check x y =
+              match int_const f y with
+              | Some (w, k) ->
+                  (match read b x with
+                  | Some (loc, width) when w = width -> Some (loc, w, k, pred = Eq)
+                  | _ when k = 0L ->
+                      Option.map (fun (loc, w, k, equal) ->
+                        (loc, w, k, if pred = Eq then not equal else equal)) (comparison b x)
+                  | _ -> None)
+              | _ -> None
+            in
+            (match check x y with Some _ as c -> c | None -> check y x)
+        | _ -> None)
+    | _ -> None
+  in
+  let guards = Array.init (num_blocks f) (fun b ->
+    match (block f b).term with
+    | Br (test, _, _, _) when live.(b) -> comparison b test
+    | _ -> None)
+  in
+  let cache = Hashtbl.create 8 in
+  let solve loc width key =
+    (* Bit 0 means equality is possible, bit 1 means inequality is possible.
+       At joins, all incoming possibilities are retained. *)
+    let state = Array.make (num_blocks f) 0 and exit = Array.make (num_blocks f) 0 in
+    let transfer = Array.map (fun ws ->
+      match List.find_opt (fun (_, dst, _) -> overlap loc dst) ws with
+      | Some (_, (_, start, size), Some `Zero)
+        when (let _, off, n = loc in start <= off && Int64.add off n <= Int64.add start size) ->
+          Some (if key = 0L then 1 else 2)
+      | Some (_, dst, Some (`Scalar (w, k))) when dst = loc && w = width ->
+          Some (if k = key then 1 else 2)
+      | Some _ -> Some 3
+      | None -> None) writes
+    in
+    let pending = Queue.create () in
+    let send dst possible =
+      let total = state.(dst) lor possible in
+      if total <> state.(dst) then begin
+        state.(dst) <- total;
+        Queue.add dst pending
+      end
+    in
+    send entry 3;
+    while not (Queue.is_empty pending) do
+      let b = Queue.take pending in
+      let out = Option.value transfer.(b) ~default:state.(b) in
+      exit.(b) <- out;
+      match guards.(b), (block f b).term with
+      | Some (cell, w, k, equal), Br (_, yes, no, _) when cell = loc && w = width && k = key ->
+          let on_true, on_false = if equal then 1, 2 else 2, 1 in
+          send yes.dest (out land on_true);
+          send no.dest (out land on_false)
+      | _ -> List.iter (fun dst -> send dst out) (successors (block f b).term)
+    done;
+    exit
+  in
+  let possible b loc w k =
+    let fact = (loc, w, k) in
+    let states =
+      match Hashtbl.find_opt cache fact with
+      | Some result -> result
+      | None ->
+          let result =
+            if Array.exists (function Some (cell, width, key, _) ->
+              cell = loc && width = w && key = k | None -> false) guards
+            then Some (solve loc w k)
+            else None
+          in
+          Hashtbl.add cache fact result;
+          result
+    in
+    match states with Some state -> state.(b) | None -> 3
+  in
+  let changed = ref false in
+  List.iter (fun (b, v) ->
+    match read b v, (block f b).term with
+    | Some (loc, w), Switch (_, fallback, cases, weights) ->
+        let test (bits, _) = possible b loc w (mask w bits.(0)) in
+        let new_term =
+          match Array.find_opt (fun case -> test case = 1) cases with
+          | Some (_, dst) -> Jump dst
+          | None ->
+              let kept = Array.of_list (List.filter (fun case -> test case <> 2) (Array.to_list cases)) in
+              if Array.length kept = Array.length cases then Switch (v, fallback, cases, weights)
+              else if Array.length kept = 0 then Jump fallback
+              else Switch (v, fallback, kept, [||])
+        in
+        if new_term <> (block f b).term then begin
+          (block f b).term <- new_term;
+          changed := true
+        end
+    | _ -> ()) !switches;
+  !changed
+
+let fold_func ?(forward = false) f =
   let changed = ref true and rounds = ref 0 in
   while !changed && !rounds < 16 do
     changed := false;
     incr rounds;
     let live = reachable f in
+    if forward then begin
+      let forwarded, edge_loads = forward_constants f live in
+      if thread_stack_branches f live edge_loads || forwarded then changed := true
+    end;
     (* instructions *)
     Vec.iter
       (fun (br : block_rec) ->
@@ -213,6 +624,7 @@ let fold_func f =
               | _ -> ())
           (block f b).params
     done;
+    if forward && narrow_stack_switches f live then changed := true;
     (* terminators, then the blocks that became unreachable *)
     Vec.iter
       (fun (br : block_rec) ->

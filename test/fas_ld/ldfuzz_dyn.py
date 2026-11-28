@@ -11,11 +11,17 @@ import resource
 import shlex
 import shutil
 import subprocess
+import sys
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools/refcache"))
+from linker import oracle_link
+from refcache import run as cached_run
 
 LOADER = "/lib64/ld-linux-x86-64.so.2"
 LIBC_DIR = "/usr/lib/x86_64-linux-gnu"
 STATUSES = ("SAME", "DIFF", "BYTES", "REFUSED", "RUN-MISMATCH", "TIMEOUT")
+LIBC_INPUTS = tuple(str(Path(LIBC_DIR) / name)
+                    for name in ("libc.so", "libc.so.6", "libc_nonshared.a")) + (LOADER,)
 REFERENCE_STATUSES = ("ref-ok", "EXPECTED-DIAG", "UNEXPECTED-FAIL")
 START = """\
 .text
@@ -41,7 +47,7 @@ class Case:
         self.candidate = candidate
         self.env = {k: v for k, v in os.environ.items()
                     if not k.startswith("LD_") and k not in ("FAS_ORACLE", "FAS_LD_THREADS")}
-        self.threads = self.rng.randint(1, 8)
+        self.threads = min(self.rng.randint(1, 8), int(os.environ.get("FAS_LD_TEST_MAX_THREADS", "8")))
         self.commands = [
             "#!/bin/sh",
             'cd -- "$(dirname -- "$0")" || exit 1',
@@ -53,7 +59,7 @@ class Case:
         ]
         self.results = []
 
-    def run(self, args, log, *, candidate=False, cwd="."):
+    def run(self, args, log, *, candidate=False, cwd=".", compile_input=None):
         command = shlex.join(["timeout", "30s", *args])
         if candidate:
             command = f"FAS_LD_THREADS={self.threads} {command}"
@@ -62,7 +68,14 @@ class Case:
         self.commands.append(command)
         env = dict(self.env, FAS_LD_THREADS=str(self.threads)) if candidate else self.env
         try:
-            proc = subprocess.run(args, cwd=self.path / cwd, env=env, capture_output=True, timeout=30)
+            if compile_input is not None:
+                proc = cached_run(args, ns="fas-ld/fuzz-cc", deps=[compile_input], outs=[log],
+                                  cwd=self.path / cwd, scratch=self.path, env=env, timeout=30, c=True)
+            elif args[0] == self.reference:
+                proc = oracle_link(args, cwd=self.path / cwd, scratch=self.path,
+                                   env=env, timeout=30, libraries=LIBC_INPUTS)
+            else:
+                proc = subprocess.run(args, cwd=self.path / cwd, env=env, capture_output=True, timeout=30)
             result = (proc.returncode, proc.stdout, proc.stderr)
         except subprocess.TimeoutExpired as error:
             result = (None, error.stdout or b"", error.stderr or b"")
@@ -80,7 +93,7 @@ class Case:
             "-fno-stack-protector", "-ffunction-sections", "-fdata-sections",
             self.rng.choice(["-O0", "-O1", "-O2", "-Os"]), *flags,
         ]
-        code, _, stderr = self.run(command, obj)
+        code, _, stderr = self.run(command, obj, compile_input=source)
         self.commands[-1] += " || exit $?"
         if code != 0:
             raise RuntimeError(f"{source}: compiler exit {code}: {stderr.decode(errors='replace')}")

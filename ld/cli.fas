@@ -184,6 +184,15 @@ const BUILD_ID_MD5 u8 = 2
 struct Config {
     output Bytes
     entry Bytes
+    entry_set bool
+    script Bytes
+    has_script bool
+    elf32 bool
+    emulation_set bool
+    emit_relocs bool
+    orphan_error bool
+    discard_none bool
+    strip_debug_arg Bytes
     items Vec[Item]
     top_items u64         // items at the top level (groups count once)
     statistics bool
@@ -211,6 +220,7 @@ struct Config {
     nostdlib bool
     relro bool
     shared bool
+    symbolic bool
     soname Bytes
     has_soname bool
     no_undefined bool
@@ -219,6 +229,7 @@ struct Config {
     has_version_script bool
     hash_style u8
     build_id u8
+    page u64                // -z max-page-size: segment/RELRO alignment, PT_LOAD p_align
 }
 
 
@@ -266,6 +277,7 @@ Linux x86-64 ELF linker.
 --allow-multiple-definition, -z muldefs  keep the first strong definition
 -z relro/norelro        enable/disable RELRO (dynamic default: enabled)
 -z now/defs/undefs      eager binding / strict / permissive undefined policy
+-z max-page-size=N      segment alignment, a power of two (default 4096)
 --dynamic-linker PATH   program interpreter (PIE default: glibc x86-64)
 -rpath PATH             runtime library search path ($ORIGIN preserved)
 --enable-new-dtags      emit RUNPATH (default); --disable-new-dtags: RPATH
@@ -315,6 +327,43 @@ fn add_item(p handle[Parser], kind u8, text Bytes) void {
 }
 
 fn is(a Bytes, s addr) bool { return bytes_eq_c(a, s) }
+
+// -z max-page-size=N (Command_line.page_size): decimal or 0x-prefixed
+// hexadecimal, a power of two from 4096 to 1 GiB, bounded digit by digit
+fn page_size(text Bytes) u64 fails {
+    hex bool = text.n > 2 && text.p[u8, 0] == 48 && (text.p[u8, 1] == 120 || text.p[u8, 1] == 88)
+    start u64 = if hex { 2 } else { 0 }
+    radix u64 = if hex { 16 } else { 10 }
+    ok bool = text.n > start
+    value u64 = 0
+    i u64 = start
+    while ok && i < text.n {
+        ch u8 = text.p[u8, i]
+        d u64 = 16
+        if ch >= 48 && ch <= 57 {
+            d = zext[u64](ch) - 48
+        } else if hex && ch >= 97 && ch <= 102 {
+            d = zext[u64](ch) - 87
+        } else if hex && ch >= 65 && ch <= 70 {
+            d = zext[u64](ch) - 55
+        }
+        if d >= radix {
+            ok = false
+        } else {
+            value = value * radix + d
+            if value > 1073741824 { ok = false }
+        }
+        i += 1
+    }
+    if !ok || value < 4096 || (value & (value - 1)) != 0 {
+        m handle[Buf] = msg()
+        bs(m, c"invalid -z max-page-size value ")
+        bb(m, text)
+        bs(m, c" (expected a power of two from 4096 to 1073741824)")
+        try die()
+    }
+    return value
+}
 
 fn fail_with(prefix addr, x Bytes) void fails {
     m handle[Buf] = msg()
@@ -381,7 +430,11 @@ fn parse_level(p handle[Parser], depth u64) u64 fails {
             c.no_interpreter = true
         } else if is(a, c"-m") {
             emulation Bytes = try take_value(p, a)
-            if !is(emulation, c"elf_x86_64") { try fail_with(c"unsupported emulation ", emulation) }
+            if !is(emulation, c"elf_x86_64") && !is(emulation, c"elf_i386") {
+                try fail_with(c"unsupported emulation ", emulation)
+            }
+            c.elf32 = is(emulation, c"elf_i386")
+            c.emulation_set = true
         } else if is(a, c"--eh-frame-hdr") {
         } else if is(a, c"-nostdlib") {
             c.nostdlib = true
@@ -440,6 +493,8 @@ fn parse_level(p handle[Parser], depth u64) u64 fails {
             c.pie = true
         } else if is(a, c"-shared") {
             c.shared = true
+        } else if is(a, c"-Bsymbolic") {
+            c.symbolic = true
         } else if is(a, c"--no-undefined") {
             c.no_undefined = true
         } else if is(a, c"--allow-multiple-definition") {
@@ -464,8 +519,11 @@ fn parse_level(p handle[Parser], depth u64) u64 fails {
                 c.relro = true
             } else if is(policy, c"norelro") {
                 c.relro = false
-            } else if is(policy, c"text") || is(policy, c"now") {
-                // all output modes already reject text relocations; binding is eager
+            } else if is(policy, c"text") || is(policy, c"now") || is(policy, c"noexecstack") {
+                // all output modes already reject text relocations; binding is
+                // eager; outputs never request an executable stack
+            } else if bytes_prefix(policy, c"max-page-size=") {
+                c.page = try page_size(arg_tail(policy, 14))
             } else if is(policy, c"defs") {
                 c.no_undefined = true
             } else if is(policy, c"undefs") {
@@ -527,6 +585,30 @@ fn parse_level(p handle[Parser], depth u64) u64 fails {
             c.output = try take_value(p, a)
         } else if is(a, c"-e") || is(a, c"--entry") {
             c.entry = try take_value(p, a)
+            c.entry_set = true
+        } else if is(a, c"-Ttext") || is(a, c"-Tdata") || is(a, c"-Tbss") ||
+            bytes_prefix(a, c"-Ttext=") || bytes_prefix(a, c"-Ttext-segment") ||
+            bytes_prefix(a, c"-Tdata=") || bytes_prefix(a, c"-Tbss=") {
+            try refuse(c"command-line section start addresses")
+        } else if is(a, c"-T") || is(a, c"--script") || bytes_prefix(a, c"--script=") || bytes_prefix(a, c"-T") {
+            if c.has_script { try refuse(c"multiple executable linker scripts") }
+            c.has_script = true
+            if is(a, c"-T") || is(a, c"--script") {
+                c.script = try take_value(p, a)
+            } else {
+                prefix u64 = if bytes_prefix(a, c"--script=") { 9 } else { 2 }
+                c.script = arg_tail(a, prefix)
+            }
+        } else if is(a, c"-q") || is(a, c"--emit-relocs") {
+            c.emit_relocs = true
+        } else if is(a, c"--orphan-handling=error") {
+            c.orphan_error = true
+        } else if bytes_prefix(a, c"--orphan-handling=") {
+            try refuse(c"only --orphan-handling=error is supported")
+        } else if is(a, c"--discard-none") {
+            c.discard_none = true
+        } else if is(a, c"-S") || is(a, c"--strip-debug") {
+            c.strip_debug_arg = a
         } else if is(a, c"-L") {
             vec_push(&c.library_paths, try take_value(p, a))
         } else if is(a, c"-l") {
@@ -556,6 +638,7 @@ fn parse_command_line_argv(argv addr, argc u64) void fails {
     c.new_dtags = true
     c.allow_shlib_undefined = true
     c.relro = true
+    c.page = 4096
     p Parser = {}
     raw Vec[Bytes] = {}
     for i u64 in 0..argc { vec_push(&raw, bytes_c(argv[addr, i])) }
@@ -571,6 +654,19 @@ fn parse_command_line_argv(argv addr, argc u64) void fails {
     if c.print_version && c.items.n == 0 {
         print_version()
         fail LinkDone
+    }
+    if !c.has_script && c.strip_debug_arg.n != 0 { try fail_with(c"unsupported option ", c.strip_debug_arg) }
+    if c.elf32 && !c.has_script { try fail_with(c"unsupported emulation ", bytes_c(c"elf_i386")) }
+    if !c.has_script && (c.emit_relocs || c.orphan_error || c.discard_none) {
+        try refuse(c"--emit-relocs, --orphan-handling and --discard-none require an executable linker script")
+    }
+    if c.symbolic && !(c.has_script && c.shared) { try refuse(c"-Bsymbolic requires a scripted shared object") }
+    if c.has_script && c.shared && (!c.symbolic || c.gc_sections || c.emit_relocs) {
+        try refuse(c"scripted shared output requires -Bsymbolic without GC or retained relocations")
+    }
+    if c.has_script && (c.relocatable || (c.pie && (!c.no_interpreter || c.gc_sections)) || c.has_interpreter ||
+        c.has_map || c.has_version_script || c.runpath != 0 || c.export_dynamic) {
+        try refuse(c"linker-script mode does not support this combination of output options")
     }
     if c.relocatable && (c.shared || c.pie || c.has_interpreter || c.no_interpreter || c.gc_sections ||
         c.has_map || c.build_id != BUILD_ID_NONE || c.has_version_script ||

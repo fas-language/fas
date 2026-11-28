@@ -35,11 +35,13 @@ let fail fmt = Printf.ksprintf (fun s -> raise (Bad s)) fmt
 let gprs = [ "rax"; "rbx"; "rcx"; "rdx"; "rsi"; "rdi"; "r8"; "r9"; "r10"; "r11"; "r12"; "r13"; "r14"; "r15" ]
 let xmms = List.init 16 (fun i -> "xmm" ^ string_of_int i)
 let is_xmm r = String.length r > 3 && String.sub r 0 3 = "xmm"
+let is_x87 r = r = "st" || r = "st(1)"
+let x87_idx = function "st" -> 0 | "st(1)" -> 1 | r -> invalid_arg ("x87_idx: " ^ r)
 
 (* Canonical name of a register as clobbers and "{...}" constraints may
    write it: any width of a GPR names the 64-bit register ("eax", "ax",
    "al", "ah", "r8d" -> "rax", "r8"), "ymmN"/"zmmN" name xmmN. Also "rsp"
-   and "rbp", which callers refuse. None for anything else. *)
+   and "rbp", which are reserved for frame management. None for anything else. *)
 let reg_canon name =
   let n = String.lowercase_ascii name in
   let n = if String.length n > 0 && n.[0] = '%' then String.sub n 1 (String.length n - 1) else n in
@@ -74,18 +76,44 @@ let reg_canon name =
   | _ -> None
 
 (* What a clobber means *)
-type clobber = Creg of string | Cmemory | Cflags | Cignored
+type clobber = Creg of string | Cx87 of int | Cmemory | Cflags | Cignored
+
+(* GNU register numbers are the target's compiler numbering, which
+   differs from the encoding order (for example, 1 is dx, not cx). *)
+let gnu_clobber_names =
+  Array.of_list
+    ([ "ax"; "dx"; "cx"; "bx"; "si"; "di"; "bp"; "sp"; "st" ]
+     @ List.init 7 (fun k -> Printf.sprintf "st(%d)" (k + 1))
+     @ [ "argp"; "flags"; "fpcr"; "fpsr"; "dirflag"; "frame" ]
+     @ List.init 8 (fun k -> "xmm" ^ string_of_int k)
+     @ List.init 8 (fun k -> "mm" ^ string_of_int k)
+     @ List.init 8 (fun k -> "r" ^ string_of_int (k + 8))
+     @ List.init 8 (fun k -> "xmm" ^ string_of_int (k + 8)))
 
 let clobber c =
-  match String.lowercase_ascii c with
+  let name = String.lowercase_ascii c in
+  let len = String.length name in
+  let base = if len > 0 && (name.[0] = '%' || name.[0] = '#') then 1 else 0 in
+  let name = String.sub name base (len - base) in
+  let name =
+    if String.for_all (function '0' .. '9' -> true | _ -> false) name then
+      match int_of_string_opt name with
+      | Some k when k < Array.length gnu_clobber_names -> gnu_clobber_names.(k)
+      | _ -> name
+    else name
+  in
+  match name with
   | "memory" -> Cmemory
   | "cc" | "flags" | "eflags" | "rflags" | "dirflag" | "fpsr" | "fpcr" -> Cflags
+  | "st" | "st(0)" -> Cx87 0
+  | n when String.length n = 5 && String.sub n 0 3 = "st(" && n.[4] = ')' && n.[3] >= '0' && n.[3] <= '7' ->
+      Cx87 (Char.code n.[3] - Char.code '0')
   | n when String.length n >= 2 && (String.sub n 0 2 = "st" || String.sub n 0 2 = "mm") ->
-      (* x87 and MMX registers: no value lives in them between instructions *)
+      (* other x87 / MMX spellings *)
       Cignored
   | n when String.length n = 2 && n.[0] = 'k' -> Cignored  (* AVX-512 masks: never used *)
   | _ -> (
-      match reg_canon c with
+      match reg_canon name with
       | Some r -> Creg r
       | None -> fail "unknown register %S in an asm clobber" c)
 
@@ -187,7 +215,7 @@ let constr ~names ~nouts ~output s =
             let r = String.sub s !i (e - !i) in
             i := e + 1;
             match reg_canon r with
-            | Some ("rsp" | "rbp") -> fail "asm constraint %S: %s cannot be an operand" s r
+            | Some "rbp" -> fail "asm constraint %S: %s cannot be an operand" s r
             | Some r -> add [ r ]
             | None -> fail "asm constraint %S: unknown register %s" s r))
     | '@' ->
@@ -203,11 +231,15 @@ let constr ~names ~nouts ~output s =
           stop := true
         end
         else fail "asm constraint %S: unknown '@' constraint" s
-    | 't' | 'u' | 'f' -> fail "asm constraint %S: x87 register operands are not supported" s
+    | 't' -> add [ "st" ]
+    | 'u' -> add [ "st(1)" ]
+    | 'f' -> fail "asm constraint %S: generic x87 'f' constraint is not supported (use 't' or 'u')" s
     | 'y' -> fail "asm constraint %S: MMX register operands are not supported" s
     | 'k' -> fail "asm constraint %S: AVX-512 mask register operands are not supported" s
     | c -> fail "asm constraint %S: unknown constraint letter '%c'" s c
   done;
+  if List.mem "rsp" !regs && (!regs <> ["rsp"] || !early || !mem || !imm <> None || !sym || !tied <> None) then
+    fail "asm constraint %S: rsp must be the only register choice" s;
   if output && !dir = In then fail "asm output constraint %S must start with '=' or '+'" s;
   if (not output) && !dir <> In then fail "asm input constraint %S cannot start with '=' or '+'" s;
   if !regs = [] && (not !mem) && !imm = None && (not !sym) && !tied = None && !flag = None then

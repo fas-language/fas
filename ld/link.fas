@@ -351,7 +351,7 @@ fn values_job(ctx addr, b u64, e u64, worker u32) void {
 // ---------- predefined symbols ----------
 
 fn seg_ending(text_only bool, memory bool) u64 {
-    value u64 = ld.lay_base + PAGE
+    value u64 = ld.lay_base + ld.lay_page
     for i u64 in 0..ld.segments.n {
         s handle[Seg] = vec_at(&ld.segments, i)
         if text_only && (s.flags & 1) == 0 { continue }
@@ -505,7 +505,7 @@ fn relocate_object(f u64) bool {
         value u64 = 0
         stub bool = !bytes_is(ts.name, c".eh_frame") && !got_relocation(r.kind) && !base_relocation(r.kind) &&
             ifunc_stub(f, si, &value)
-        if !stub && ld.dyn_file != NONE64 {
+        if !stub && ld.dyn_file != NONE64 && !config().has_script {
             if (r.kind == 4 || r.kind == 2) && lx(f).gotref[u32, k] != NONE {
                 stub = dyn_stub_address(lx(f).gotref[u32, k], &value)
             } else if r.kind == 1 && canonical_ifunc(f, si) {
@@ -586,9 +586,61 @@ fn relocate_object(f u64) bool {
     return true
 }
 
+fn relocate_object_32(f u64) bool {
+    o handle[Obj] = obj(f)
+    m handle[Buf] = &o.msg
+    vv handle[Values] = vals(f)
+    for k u64 in 0..zext[u64](o.nrel) {
+        r handle[Rel] = rel(o, k)
+        t u64 = zext[u64](r.target)
+        kind u32 = r.kind
+        if kind == 0 || !kept(f, t) { continue }
+        target handle[Place] = place(f, t)
+        si u64 = zext[u64](r.symbol)
+        y handle[Sym] = sym(o, si)
+        if kind != 10 && vv.has[u8, si] == 0 &&
+            ((sec(o, t).flags & 2) != 0 || !(y.section != 0 || name_defined(y.name))) {
+            reloc_context(m, f, r)
+            bs(m, c": undefined symbol ")
+            bb(m, y.name)
+            return false
+        }
+        x u64 = vv.v[u64, si] + r.addend
+        if kind == 9 { x -= dyn_place(DYN_GOTPLT).address }
+        if kind == 10 { x = dyn_place(DYN_GOTPLT).address + r.addend }
+        pc_relative bool = kind == 2 || kind == 4 || kind == 10 || kind == 21 || kind == 23
+        if pc_relative { x -= target.address + r.offset }
+        width u64 = reloc32_width(kind)
+        if width < 4 {
+            sx i64 = bitcast[i64](x)
+            limit i64 = 1 << (width * 8 - 1)
+            upper i64 = if pc_relative { limit } else { limit * 2 }
+            if sx < 0 - limit || sx >= upper {
+                reloc_context(m, f, r)
+                bs(m, c": i386 relocation ")
+                bu(m, zext[u64](kind))
+                bs(m, c" overflow: result 0x")
+                bx(m, x)
+                return false
+            }
+        }
+        offset u64 = target.offset + r.offset
+        if target.valid == 0 || offset > ld.image_size || width > ld.image_size - offset {
+            reloc_context(m, f, r)
+            bs(m, c": relocation exceeds its output section")
+            return false
+        }
+        if width == 4 { wr32(ld.image, offset, x) }
+        else if width == 2 { wr16(ld.image, offset, x) }
+        else { wr8(ld.image, offset, x) }
+    }
+    return true
+}
+
 fn relocate_job(ctx addr, b u64, e u64, worker u32) void {
     for f u64 in b..e {
-        lx(f).status = if relocate_object(f) { 0 } else { 1 }
+        ok bool = if config().elf32 { relocate_object_32(f) } else { relocate_object(f) }
+        lx(f).status = if ok { 0 } else { 1 }
     }
 }
 
@@ -758,6 +810,7 @@ fn build_image() void fails {
     // Dynamic.pie: shared output is position independent too
     ld.lay_base = if c.pie || c.mode == MODE_SHARED { 0 } else { LAYOUT_BASE }
     ld.lay_relro = ld.dyn_file != NONE64 && c.relro
+    ld.lay_page = c.page
     if ld.nobj == 0 { try die_c(c"no input objects") }
     mt PhaseStart = {}
     phase_begin(PH_MERGE, &mt)
@@ -915,7 +968,7 @@ fn build_image() void fails {
             program_header(1, 3, 4, ip.offset, ip.address, is, is, 1)
         }
     }
-    program_header(prefix, 1, 4, 0, ld.lay_base, header_size, header_size, PAGE)
+    program_header(prefix, 1, 4, 0, ld.lay_base, header_size, header_size, ld.lay_page)
     for i u64 in 0..ld.segments.n {
         s handle[Seg] = vec_at(&ld.segments, i)
         program_header(prefix + i + 1, 1, s.flags, s.offset, ld.lay_base + s.offset, s.file_size, s.memory_size, s.alignment)
@@ -998,6 +1051,244 @@ fn build_image() void fails {
 
 // ---------- publishing (File_io) ----------
 
+// Only static relocations are allowed in an executable linker script.
+fn script_check_inputs() void fails {
+    if ld.shlibs.n != 0 { try refuse(c"shared library input in a linker script") }
+    for f u64 in 0..ld.ninput_objects {
+        o handle[Obj] = obj(f)
+        for k u64 in 1..zext[u64](o.nsec) {
+            h handle[Sec] = sec(o, k)
+            if !kept(f, k) { continue }
+            unsupported u64 = if config().elf32 || config().shared { 0x480 } else { 0x4b0 }
+            if ls_input_kind(h.kind) && (h.flags & unsupported) != 0 {
+                try refuse(c"merge, link-order or TLS sections in a linker script")
+            }
+            if (!config().shared && bytes_is(h.name, c".eh_frame")) || bytes_is(h.name, c".note.gnu.property") {
+                try refuse(c"unwind or GNU property output in a linker script")
+            }
+            if h.kind == 9 && !config().elf32 { try refuse(c"REL input relocations in an ELF64 script") }
+            if config().shared && h.size != 0 &&
+                (h.kind == 14 || h.kind == 15 || h.kind == 16 || bytes_is(h.name, c".init") || bytes_is(h.name, c".fini")) {
+                try refuse(c"initialization and finalization require a dynamic loader")
+            }
+        }
+        for i u64 in 1..zext[u64](o.nsym) {
+            y handle[Sym] = sym(o, i)
+            if (y.kind == 6 || y.kind == 10) && (y.section == 0 || live(f, y)) {
+                try refuse(c"TLS or IFUNC symbols in a linker script")
+            }
+        }
+        for i u64 in 0..zext[u64](o.nrel) {
+            r handle[Rel] = rel(o, i)
+            if !kept(f, zext[u64](r.target)) { continue }
+            kind u32 = r.kind
+            if config().elf32 && (kind == 9 || kind == 10) && !config().shared {
+                try refuse(c"i386 GOT relocations require a scripted shared object")
+            }
+            if kind != 0 && bytes_prefix(sec(o, zext[u64](r.target)).name, c".debug") {
+                df u64 = 0
+                ds u64 = 0
+                if definition(f, zext[u64](r.symbol), &df, &ds) && !live(df, sym(obj(df), ds)) {
+                    try refuse(c"DWARF relocations to discarded sections in a linker script")
+                }
+            }
+            if !config().elf32 && kind != 0 && kind != 1 && kind != 2 && kind != 4 && kind != 10 && kind != 11 && kind != 24 {
+                if config().mode == MODE_STATIC_PIE || config().shared {
+                    m handle[Buf] = msg()
+                    bb(m, o.path)
+                    bs(m, c": unsupported scripted PIE relocation ")
+                    bu(m, zext[u64](kind))
+                    bs(m, c" against ")
+                    bb(m, sym(o, zext[u64](r.symbol)).name)
+                    try refuse(cstr_dup(buf_bytes(m)))
+                }
+                try refuse(c"non-static relocation in a linker script")
+            }
+        }
+    }
+}
+
+fn script_entry() u64 fails {
+    name Bytes = config().entry
+    id u32 = find(name)
+    if id != NONE && gsym(id).has_res != 0 {
+        g handle[GSym] = gsym(id)
+        f u64 = zext[u64](g.res_file)
+        y handle[Sym] = sym(obj(f), zext[u64](g.res_sym))
+        if live(f, y) { return sym_address(f, y) }
+    }
+    if config().entry_set || ld.lscript.entry_seen {
+        m handle[Buf] = msg()
+        bs(m, c"undefined entry symbol ")
+        bb(m, name)
+        try die()
+    }
+    if config().shared { return 0 }
+    i u64 = ls_lookup(&ld.lscript.section_names, bytes_c(c".text"))
+    if i != 0 && ls_sec(i).keep { return ls_sec(i).address }
+    return 0
+}
+
+fn script_pie_metadata() void fails {
+    if config().elf32 || config().emit_relocs { try refuse(c"scripted PIE requires ELF64 without retained relocations") }
+    for k u64 in 0..5 {
+        name addr = c".dynamic"
+        if k == 1 { name = c".dynsym" }
+        if k == 2 { name = c".dynstr" }
+        if k == 3 { name = c".hash" }
+        if k == 4 { name = c".gnu.hash" }
+        if !ls_discards(bytes_c(name)) { try refuse(c"scripted PIE requires discarded dynamic metadata") }
+    }
+}
+
+fn script_check_pic() void fails {
+    for f u64 in 0..ld.ninput_objects {
+        o handle[Obj] = obj(f)
+        for i u64 in 0..zext[u64](o.nrel) {
+            r handle[Rel] = rel(o, i)
+            t u64 = zext[u64](r.target)
+            p handle[Place] = place(f, t)
+            if r.kind == 0 || !kept(f, t) || p.valid == 0 || (ls_sec(zext[u64](p.output_index)).flags & 2) == 0 { continue }
+            if config().elf32 && r.kind == 10 {
+                y handle[Sym] = sym(o, zext[u64](r.symbol))
+                if y.section != 0 || !bytes_is(y.name, c"_GLOBAL_OFFSET_TABLE_") ||
+                    name_defined(y.name) || dyn_place(DYN_GOTPLT).valid == 0 {
+                    try refuse(c"i386 GOTPC requires the synthetic GOT base symbol")
+                }
+                continue
+            }
+            df u64 = 0
+            ds u64 = 0
+            relative bool = false
+            if definition(f, zext[u64](r.symbol), &df, &ds) {
+                if df == ld.script_file {
+                    s u64 = ld.lscript.synth_sections[u64, ds]
+                    relative = s != 0 && (ls_sec(s).flags & 2) != 0
+                } else {
+                    y handle[Sym] = sym(obj(df), ds)
+                    if y.section != 0 && y.section < 0xff00 {
+                        q handle[Place] = place(df, zext[u64](y.section))
+                        relative = q.valid != 0 && (ls_sec(zext[u64](q.output_index)).flags & 2) != 0
+                    }
+                }
+            } else if config().shared {
+                try refuse(c"undefined symbol in scripted shared output")
+            }
+            pc_relative bool = if config().elf32 { r.kind == 2 || r.kind == 4 || r.kind == 9 || r.kind == 21 || r.kind == 23 }
+                else { r.kind == 2 || r.kind == 4 || r.kind == 24 }
+            if relative != pc_relative {
+                if config().shared { try refuse(c"scripted shared output requires a run-time relocation") }
+                try refuse(c"scripted PIE requires a run-time relocation")
+            }
+        }
+    }
+}
+
+fn script_prepare_shared() void fails {
+    if ld.shlibs.n != 0 { try refuse(c"scripted shared objects cannot use shared library inputs") }
+    sc handle[Lscript] = &ld.lscript
+    if !sc.explicit_phdrs || sc.phdrs.n == 0 || !ls_phdr(1).filehdr {
+        try refuse(c"scripted shared output requires an initial PT_LOAD with FILEHDR PHDRS")
+    }
+    for f u64 in 0..ld.ninput_objects {
+        o handle[Obj] = obj(f)
+        for k u64 in 1..zext[u64](o.nsec) {
+            if ls_discards(sec(o, k).name) { lx(f).kept[u8, k] = 0 }
+        }
+    }
+    symver_plan()
+    try shared_output_prepare()
+    try unwind_normalize()
+    try unwind_prepare()
+    try dyn_prepare()
+}
+
+fn script_shared_metadata() void fails {
+    for k u64 in 1..DYN_SECTION_COUNT {
+        if !kept(ld.dyn_file, k) && sec(obj(ld.dyn_file), k).size == 0 { continue }
+        if k == DYN_INTERP || k == DYN_PLT || k == DYN_RELA || k == DYN_VERSYM && ld.dyn_verdef_count == 0 { continue }
+        p handle[Place] = dyn_place(k)
+        if p.valid == 0 { try refuse(c"scripted shared metadata is missing from SECTIONS") }
+        s handle[LsSection] = ls_sec(zext[u64](p.output_index))
+        h handle[Sec] = sec(obj(ld.dyn_file), k)
+        if k != DYN_GOTPLT && (s.kind != h.kind || s.size != h.size || (s.flags & 2) == 0) {
+            try refuse(c"scripted dynamic metadata must occupy a dedicated allocatable section")
+        }
+    }
+    dynamic u64 = zext[u64](dyn_place(DYN_DYNAMIC).output_index)
+    unwind u64 = 0
+    if ld.unwind_file != NONE64 { unwind = zext[u64](place(ld.unwind_file, 1).output_index) }
+    found_dynamic bool = false
+    found_unwind bool = false
+    for j u64 in 1..ld.lscript.phdrs.n + 1 {
+        p handle[LsPhdr] = ls_phdr(j)
+        if p.kind == 2 {
+            if found_dynamic || p.first != dynamic || p.last != dynamic {
+                try refuse(c"scripted PT_DYNAMIC must contain only the dynamic table")
+            }
+            found_dynamic = true
+        } else if p.kind == 0x6474e550 && unwind != 0 {
+            if found_unwind || p.first != unwind || p.last != unwind {
+                try refuse(c"scripted PT_GNU_EH_FRAME must contain only the unwind index")
+            }
+            found_unwind = true
+        }
+    }
+    if !found_dynamic { try refuse(c"scripted shared output requires PT_DYNAMIC") }
+    if ld.unwind_file != NONE64 && !found_unwind {
+        try refuse(c"scripted unwind index requires its own PT_GNU_EH_FRAME")
+    }
+}
+
+fn build_image_script() void fails {
+    if ld.ninput_objects == 0 { try die_c(c"no input objects") }
+    phase_begin(PH_EMIT, &ld.emit_start)
+    alloc_tables()
+    if config().gc_sections { gc_sections() }
+    shared bool = config().shared
+    pie bool = config().mode == MODE_STATIC_PIE
+    if shared { try script_prepare_shared() }
+    try build_id_prepare()
+    try ls_match_inputs()
+    if shared { try unwind_script_layout() }
+    if !pie && !shared { try script_check_inputs() }
+    try check_non_alloc_references()
+    try ls_addresses()
+    if pie { try script_pie_metadata() }
+    if pie || shared {
+        if !config().elf32 { relax_static_pie() }
+        try script_check_inputs()
+        try script_check_pic()
+    }
+    try ls_content_layout()
+    if shared { try script_shared_metadata() }
+    entry u64 = try script_entry()
+    im LsImage = {}
+    try ls_rela_layout(&im)
+    try ls_image_layout(&im)
+    ls_fill()
+    ls_emit_data()
+    ld_pool_for(ld.content.n, 64, &blit_job, null)
+    ld.values = heap_alloc_zeroed(ld.nobj * sizeof[Values])
+    ld_pool_for(ld.nobj, 1, &values_job, null)
+    rt PhaseStart = {}
+    phase_begin(PH_RELOCATE, &rt)
+    ld_pool_for(ld.nobj, 1, &relocate_job, null)
+    for f u64 in 0..ld.nobj {
+        if lx(f).status != 0 { try die_buf(&obj(f).msg) }
+    }
+    phase_end(PH_RELOCATE, &rt)
+    if shared {
+        try unwind_emit()
+        try dyn_emit()
+    }
+    try ls_write_header(&im, entry)
+    try ls_write_phdrs()
+    ls_emit_symbols(&im)
+    ls_emit_relas(&im)
+    ls_write_shdrs(&im)
+}
+
 fn stat_or_die(path Bytes, st handle[Stat]) void fails {
     os_stat(path.p, st, true) catch e { try die_io(c"stat", path, e) }
 }
@@ -1054,6 +1345,10 @@ fn link_and_publish() void fails {
         vec_push(&paths, c.version_script)
         vec_push(&ld.expanded, c.version_script)
     }
+    if c.has_script {
+        vec_push(&paths, c.script)
+        vec_push(&ld.expanded, c.script)
+    }
     discard bool = false
     if !in_mem {
         // the map is checked before the executable, and published (inside the
@@ -1068,8 +1363,9 @@ fn link_and_publish() void fails {
         discard = exists && try null_output(output, &st)
     }
     vec_free(&paths)
+    if c.has_script { try ls_parse(c.script, try input_read(c.script, 4 * 1024 * 1024)) }
     try resolve()
-    try build_image()
+    if c.has_script { try build_image_script() } else { try build_image() }
     try build_id_emit()
     phase_end(PH_EMIT, &ld.emit_start)
     if in_mem {

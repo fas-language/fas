@@ -4,7 +4,8 @@ The OCaml linker (`src/linker`, about 8,900 lines) is the specification:
 single-threaded, byte-exact, with strict work limits and exact diagnostics.
 `fas-ld` (`ld/*.fas`) is a freestanding Fas implementation (no libc, built on
 `lib/`) designed for many-core CPUs and in-process embedding while remaining
-**byte-identical** to the OCaml linker across all thread counts.
+**byte-identical** to the OCaml linker across all thread counts for their
+shared modes. Executable linker scripts use ld.lld as their reference.
 
 ## Contract
 
@@ -28,10 +29,12 @@ single-threaded, byte-exact, with strict work limits and exact diagnostics.
 | `ld/api.fas` | In-process library API (`ld_link`), `LdVfs` virtual filesystem & in-memory output, `ld_reset` re-entrancy cleanup, and incremental early-parse session (`ld_session_begin`, `ld_add_input`, `ld_finish`). |
 | `ld/util.fas` | Diagnostics (`msg`/`die`/`refuse`), library-mode non-local exit (`fas_ld_setjmp`/`fas_ld_longjmp`), checked arithmetic, LE readers/writers, `KeyIndex`. |
 | `ld/cli.fas` | Command-line and `@response` file parsing (`parse_command_line_argv`, `Config`). |
-| `ld/elf.fas` | Parallel-safe ELF64 x86-64 relocatable object parser (`elf_parse`, SDT notes, zlib-compressed debug). |
+| `ld/elf.fas` | Parallel-safe x86-64 and i386 relocatable object parser. ELF64 also supports SDT notes and zlib-compressed debug. |
 | `ld/shared.fas` | Parallel-safe ELF64 x86-64 `ET_DYN` shared-object reader (`shared_is`, `shared_parse`, SysV/GNU hash & verdef/verneed/versym validation, `sh_find_location`). |
 | `ld/archive.fas` | SysV/GNU and thin archive reader (including nested thin members), `-l` library search, lazy GNU extraction (`extract`). |
 | `ld/script.fas` | Bounded linker script lexer/parser (`INPUT`, `GROUP`, `AS_NEEDED`, `SEARCH_DIR`, `OUTPUT_FORMAT`) and `--sysroot` normalization. |
+| `ld/lscript.fas` | Executable linker-script parser, input section selection, script symbols, and convergent address assignment. |
+| `ld/limage.fas` | Scripted ELF file offsets, PHDRs, section fills, symbol table, and retained RELA (ELF64) or REL (ELF32) records. |
 | `ld/shdeps.fas` | `$ORIGIN`/`${ORIGIN}` expansion, transitive `DT_NEEDED` loading (`-rpath-link`, `DT_RUNPATH`, inherited `DT_RPATH`), and link-time validation. |
 | `ld/resolve.fas` | Input staging, parallel `.o`/`.so` parsing with input-order diagnostics, global symbol resolution, COMDAT, commons, predefined symbols, `shdeps_load`. |
 | `ld/verscript.fas` | Version script parser and glob/exact visibility policy. |
@@ -80,6 +83,70 @@ Passes execute serially on the main thread; data-parallel passes fan out over
    - `unwind_emit`, `ifunc_emit`, `dyn_emit`, symtab/headers, `build_id_emit`
 5. **Publish**: Either captured in memory (`LdVfs.in_memory`) or atomically
    written to disk (`file_write_atomic`).
+
+## Executable linker scripts
+
+`-T PATH` and `--script=PATH` select the x86-64 or i386 script path.
+Select i386 with `-m elf_i386`, `OUTPUT_FORMAT("elf32-i386")`, or
+`OUTPUT_ARCH(i386)`. Repeated `-m` options select the last emulation and
+must agree with the script when it specifies the target.
+`ENTRY` sets the entry symbol, with `-e` taking precedence. `-q` or
+`--emit-relocs` retains relocation records against output symbols and sections.
+`--discard-none` retains local symbols. `--orphan-handling=error` reports
+unassigned input sections as link errors. By default, ELF32 places unassigned
+non-allocated debug and comment sections at address zero. In BIOS scripts
+with consecutive `.text32` and `.text64` areas, an executable `.inittext`
+orphan goes after the code-end assignments and before the data alignment.
+`-S` or `--strip-debug` removes non-allocated debug sections and their
+symbols and relocations before scripted layout. Other unsupported orphan
+placement returns exit 3.
+
+The parser recognizes the x86-64 kernel's `OUTPUT_FORMAT`, `OUTPUT_ARCH`,
+`PHDRS`, and `SECTIONS` directives. It supports `PT_LOAD` and `PT_NOTE`,
+section addresses, `AT`, `ALIGN`, `(INFO)`, fixed fill patterns, `LONG`, and
+`/DISCARD/`. Input descriptions use the `*` file selector with section
+patterns, optionally wrapped in `KEEP` and `SORT`. Integer expressions can
+reference symbols, the location counter, section addresses and sizes.
+Assignments and referenced `PROVIDE` definitions participate in symbol
+resolution. Address assignment iterates until sections and script symbols
+stabilize, then checks assertions and applies relocations using the final
+addresses. The symbol table preserves each script symbol's output section
+and type where the expression carries them.
+
+The script path supports Linux defconfig's final link and static i386
+executables. ELF32 supports `R_386_32`, `R_386_PC32`, `R_386_PLT32`, `R_386_16`,
+`R_386_PC16`, `R_386_8`, and `R_386_PC8`. Unsupported
+directives and combinations return exit 3. These include `MEMORY` and
+`OVERLAY`, named input-file patterns, `COMMON`,
+TLS, IFUNC, unrelaxed GOT slot relocations, and script mode combined with
+maps or `-r`. Static executables support `--gc-sections`. The
+collector roots `KEEP` inputs and definitions referenced by script
+expressions. Archives listed under `--whole-archive`
+are supported. An ELF64 script can produce `-pie --no-dynamic-linker` output
+when it discards dynamic metadata and every allocated relocation can be
+resolved without a dynamic loader. Relaxation of GOT references to
+section-relative script symbols uses their final layout. Lazy extraction in this mode requires
+script symbol assignments and references to be disjoint from the archive
+index. The supported explicit metadata layout
+places `.symtab`, `.strtab` and `.shstrtab` in order after content. The
+linker uses its existing whole-image build-ID algorithm and omits ld.lld's
+synthetic `.comment` section.
+
+Linux's i386 and x86-64 vDSO scripts use `-shared -Bsymbolic`. This mode
+supports embedded `VERSION` blocks, `SIZEOF_HEADERS`, paired `FILEHDR PHDRS`
+on the first `PT_LOAD`, `PT_DYNAMIC`, and `PT_GNU_EH_FRAME` (numeric
+`0x6474e550`). It emits versioned symbol and hash tables, an unwind index,
+and an i386 GOT base for `R_386_GOTOFF` and `R_386_GOTPC`. Scripted shared
+objects require all allocated relocations to resolve at link time. Imports,
+lifecycle sections, garbage collection, and retaining relocations are
+outside this subset. The unwind records occupy a dedicated `.eh_frame`
+section. Adjacent inputs can share an identical CIE with no relocations.
+
+`bash test/fas_ld_script.sh` checks the supported layout, script symbols,
+retained relocations, entry override, thread determinism, versioned shared
+output and diagnostics.
+`KERNEL_LD=fas bash test/cc_kernel.sh fcc defconfig` runs the scripted
+final-link path and boots the result.
 
 ## In-Process Library API & VFS (`ld/api.fas`)
 

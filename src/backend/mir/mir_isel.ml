@@ -28,13 +28,20 @@ type ctx = {
   fn : F.func;
   mf : Mir.func;
   pic : bool;
+  kernel_model : bool;
+  no_sse : bool;
+  stack_align : int;
+      (** the alignment rsp (and so rbp) is known to have: 16 by the SysV
+          ABI, 8 under -mstack-alignment=8 (the kernel's entry code leaves
+          the stack 8-aligned). Frame slots and dynamic allocations get this
+          much for free; anything aligned above it is padded and rounded up. *)
   tls_gd : bool;  (** thread-locals through __tls_get_addr (shared-library objects) *)
   local_syms : (string, unit) Hashtbl.t;
       (** symbols defined here that no other module can preempt *)
   label_funcs : (string, unit) Hashtbl.t;
       (** functions defined here and called directly (not weak) *)
   tls_syms : (string, unit) Hashtbl.t;  (** thread-local variables *)
-  vals : (int, reg) Hashtbl.t;
+  vals : reg option array;  (** indexed by canonical Fir value ID *)
   mutable cur : int;  (** the Mir block instructions go to *)
   mutable fir_block : int;
   mutable sret : reg option;  (** the hidden result pointer, in a MEMORY-class function *)
@@ -72,6 +79,7 @@ let cls_of_ty = function
   (* f16 reaches isel only at signatures and bitcasts with i16 (Fir_wide
      computes it as i16 bits): it lives in the low bits of an xmm *)
   | F.F16 -> Xmm
+  | F.Vec (2, F.Int 64) -> Xmm
   | t -> unsupported "values of type %s" (F.ty_to_string t)
 
 let width = function
@@ -92,11 +100,11 @@ let align_up x a = (x + a - 1) / a * a
 
 let vreg c v =
   let v = F.resolve c.fn v in
-  match Hashtbl.find_opt c.vals v with
+  match c.vals.(v) with
   | Some r -> r
   | None ->
       let r = fresh c (cls_of_ty (ty c v)) in
-      Hashtbl.add c.vals v r;
+      c.vals.(v) <- Some r;
       r
 
 let copy c r =
@@ -123,8 +131,9 @@ let fconst c dbl (x : float) =
   fbits c dbl (if dbl then Int64.bits_of_float x else Int64.of_int32 (Int32.bits_of_float x))
 
 (* The address of a symbol plus an addend: through the GOT when another
-   module may define (or interpose) it, else rip-relative; a thread-local
-   variable's is the thread pointer plus its offset. Only lea after
+   module may define (or interpose) it, else rip-relative in the small model
+   or absolute in the kernel model. A TLS address is the thread pointer
+   plus its offset. Only lea after
    the GOT load, so materializing it never touches the flags. *)
 let sym_addr c name (addend : int64) =
   let t = fresh c Gpr in
@@ -153,10 +162,13 @@ let sym_addr c name (addend : int64) =
     emit c (Got (t, name));
     add_addend ()
   end
-  else if fits32 addend then emit c (Lea (t, { (at (Bsym name)) with disp = Int64.to_int addend }))
   else begin
-    emit c (Lea (t, at (Bsym name)));
-    add_addend ()
+    let base = if c.kernel_model then Babs name else Bsym name in
+    if fits32 addend then emit c (Lea (t, { (at base) with disp = Int64.to_int addend }))
+    else begin
+      emit c (Lea (t, at base));
+      add_addend ()
+    end
   end;
   t
 
@@ -192,11 +204,36 @@ let use c v =
           t
       | None -> vreg c v)
 
+(* [p] as a symbol plus a constant: directly, or through a chain of
+   constant ptradds (a field of a nested struct, like pv_ops.mmu.flush) *)
+let rec sym_plus fn p =
+  match F.const_of fn p with
+  | Some (Csym (name, addend)) -> Some (name, addend)
+  | _ -> (
+      match F.def_of fn (F.resolve fn p) with
+      | Result (i, 0) -> (
+          match (F.inst fn i).op with
+          | Ptradd (_, base, idx, scale, disp) -> (
+              match (sym_plus fn base, F.int_value fn idx) with
+              | Some (name, addend), Some k ->
+                  Some (name, Int64.add addend (Int64.add (Int64.mul k (Int64.of_int scale)) (Int64.of_int disp)))
+              | _ -> None)
+          | _ -> None)
+      | _ -> None)
+
 (* the memory operand for an access through pointer [p] *)
 let addr_of c p =
   match Hashtbl.find_opt c.frame (F.resolve c.fn p) with
   | Some s -> slot_addr s
-  | None -> at_reg (use c p)
+  | None -> (
+      match if c.kernel_model then sym_plus c.fn p else None with
+      (* Like gcc and clang, the kernel model accesses a symbol (plus a
+         constant) rip-relative and keeps absolute addresses for pointer
+         values. Early boot code (head64.c) runs from the identity map and
+         relies on this to read globals before the kernel mapping exists. *)
+      | Some (name, addend) when fits32 addend && not (Hashtbl.mem c.tls_syms name) ->
+          { (at (Bsym name)) with disp = Int64.to_int addend }
+      | _ -> at_reg (use c p))
 
 let def c v r = emit c (Copy (vreg c v, r))
 
@@ -623,9 +660,9 @@ let fcmp_with c (p : F.fcmp) ucomi ra rb =
   | Fule -> cmp ra rb Be
   | Funo -> cmp ra rb P
 
-let fcmp c p a b =
+let fcmp c p signaling a b =
   let dbl = is_dbl (ty c a) in
-  fcmp_with c p (fun x y -> emit c (Ucomi (dbl, x, y))) (use c a) (use c b)
+  fcmp_with c p (fun x y -> emit c (if signaling then Comi (dbl, x, y) else Ucomi (dbl, x, y))) (use c a) (use c b)
 
 (* ---------- conversions ---------- *)
 
@@ -865,10 +902,10 @@ let copy80 c ~src v = copy_bytes c ~src ~dst:(dst80 c v) 10
 let pow2_80 c e = const80 c Int64.min_int (Int64.of_int (16383 + e))
 
 (* flags as ucomis x, y would set them *)
-let ucomi80 c x y =
+let ucomi80 ?(signaling = false) c x y =
   fld80 c y;
   fld80 c x;
-  x87 c Fucomip;
+  x87 c (if signaling then Fcomip else Fucomip);
   x87 c Fpop
 
 (* runs [body] with the x87 rounding control set to [rc] (0 nearest,
@@ -1237,6 +1274,8 @@ type plan =
   | Pregs of int * (int * eightbyte * reg) list  (** agg size, its parts in registers *)
   | Pstack of int * int  (** agg size, stack offset *)
   | Pmem80 of int  (** an f80 scalar (MEMORY class): its stack offset *)
+  | Pms_bits of int * loc  (** a small record coerced to an integer *)
+  | Pms_ref of F.abi * int * int * loc  (** address of the caller's copy *)
 
 (* Assigns registers and stack offsets to a list of ABI types; returns the
    plans, the stack bytes used and the number of xmm registers used *)
@@ -1294,6 +1333,32 @@ let plan_args ~sret abis =
   in
   (plans, !st, !xp)
 
+let ms_gpr_args = X64.[| Rcx; Rdx; R8; R9 |]
+
+let sret_reg ms_abi = G (if ms_abi then Rcx else Rdi)
+
+(* Each argument consumes one ordinal, including the hidden result
+   pointer. The caller always reserves all four register home slots. *)
+let plan_ms_args ~sret abis =
+  let first = if sret then 1 else 0 in
+  let plans = List.mapi (fun i (abi : F.abi) ->
+    let i = i + first in
+    let loc cls =
+      if i >= 4 then Lstack (8 * i)
+      else Lreg (match cls with Gpr -> G ms_gpr_args.(i) | Xmm -> X i)
+    in
+    match F.agg_view abi with
+    | Agg { size; _ } when Fir_abi.ms_reg_size size -> Pms_bits (size, loc Gpr)
+    | Agg { size; align; _ } -> Pms_ref (abi, size, align, loc Gpr)
+    | Scalar F.F80 -> Pms_ref (abi, 16, 16, loc Gpr)
+    | Scalar t | Ext (t, _) -> Pscalar (t, None, loc (cls_of_ty t))
+    | Cplx _ -> assert false)
+    abis
+  in
+  (plans, 8 * max 4 (first + List.length abis), 0)
+
+let call_arg_plans ms_abi = if ms_abi then plan_ms_args else plan_args
+
 type ret_plan =
   | Rnone
   | Rscalar of F.ty
@@ -1347,8 +1412,16 @@ let ret_regs = function
   | Rmulti (l, _) ->
       List.filter_map (function _, Mgpr k -> Some (G (if k = 0 then Rax else Rdx)) | _, Mxmm k -> Some (X k) | _, Mmem _ -> None) l
 
-(* true when the call passes a hidden pointer in rdi: sret or the block of
-   several results *)
+let call_ret_plan (sig_ : F.signature) =
+  if not sig_.ms_abi then plan_ret sig_.result_abis
+  else if sig_.ms_xmm_result then Rregs (16, [ (0, Esse16, X 0) ])
+  else match List.map F.agg_view sig_.result_abis with
+  | [ Agg { size; _ } ] when Fir_abi.ms_reg_size size -> Rregs (size, [ (0, Eint, G Rax) ])
+  | [ Agg { size; align; _ } ] -> Rsret (size, align)
+  | _ :: _ :: _ -> unsupported "multiple results with the Microsoft x64 calling convention"
+  | _ -> plan_ret sig_.result_abis
+
+(* True when the call passes a hidden pointer for sret or several results. *)
 let hidden_ptr = function Rsret _ | Rmulti (_, Some _) -> true | _ -> false
 
 (* the type a scalar result has inside the function *)
@@ -1400,13 +1473,13 @@ let load_eightbytes c size p l =
       | Esse16 -> Mload16 (r, slot_addr ~disp:o s))
     l
 
-(* memory of [size] bytes aligned to [align], which may exceed the 16 a
-   frame slot gets: a pointer register to it *)
+(* memory of [size] bytes aligned to [align], which may exceed the
+   stack_align a frame slot gets: a pointer register to it *)
 let aligned_mem c size align =
   let p = fresh c Gpr in
-  if align <= 16 then emit c (Lea (p, slot_addr (new_slot c.mf ~size:(max 1 size) ~align:(max 8 align))))
+  if align <= c.stack_align then emit c (Lea (p, slot_addr (new_slot c.mf ~size:(max 1 size) ~align:(max 8 align))))
   else begin
-    emit c (Lea (p, slot_addr (new_slot c.mf ~size:(size + align - 16) ~align:16)));
+    emit c (Lea (p, slot_addr (new_slot c.mf ~size:(size + align - c.stack_align) ~align:(min 16 align))));
     emit c (Alui (Add, p, align - 1));
     emit c (Alui (And, p, - align))
   end;
@@ -1448,7 +1521,7 @@ let mem_result_out c (a : F.abi) v ad =
       | (F.F32 | F.F64) as t -> emit c (Fstore (is_dbl t, ad, use c v))
       | t -> emit c (Store (mem_size t, ad, use c v)))
 
-let call c ~(sig_ : F.signature) ~callee ~args ~attrs ~va_aggs results =
+let call ?(discard_results = false) c ~(sig_ : F.signature) ~callee ~args ~attrs ~va_aggs results =
   let nfixed = List.length sig_.param_abis in
   let abis =
     List.mapi
@@ -1457,14 +1530,14 @@ let call c ~(sig_ : F.signature) ~callee ~args ~attrs ~va_aggs results =
         else match List.assoc_opt i va_aggs with Some abi -> abi | None -> F.Scalar (ty c a))
       (Array.to_list args)
   in
-  let rp = plan_ret sig_.result_abis in
+  let rp = call_ret_plan sig_ in
   let sret = hidden_ptr rp in
-  let plans, stack, nx = plan_args ~sret abis in
+  let plans, stack, nx = call_arg_plans sig_.ms_abi ~sret abis in
   c.mf.out_size <- max c.mf.out_size stack;
   (* an argument in memory aligned above 16 needs rsp aligned so at the
      call (the outgoing area starts at rsp) *)
   let out_align = List.fold_left (fun m (a : F.abi) -> match F.agg_view a with Agg { align; _ } -> max m align | _ -> m) 16 abis in
-  if out_align > 16 then emit c (Align_sp out_align);
+  if not sig_.ms_abi && out_align > 16 then emit c (Align_sp out_align);
   let target =
     match callee with
     | F.Direct name -> if Hashtbl.mem c.label_funcs name then Tlabel name else Tsym name
@@ -1473,6 +1546,11 @@ let call c ~(sig_ : F.signature) ~callee ~args ~attrs ~va_aggs results =
   (* memory first, then the register moves, so no temporary needs a
      register an argument already occupies *)
   let pending = ref [] in
+  let pass_gpr loc r =
+    match loc with
+    | Lreg p -> pending := Mreg (p, r) :: !pending
+    | Lstack o -> emit c (Store (8, { (at Bout) with disp = o }, r))
+  in
   List.iteri
     (fun i plan ->
       let a = args.(i) in
@@ -1481,23 +1559,41 @@ let call c ~(sig_ : F.signature) ~callee ~args ~attrs ~va_aggs results =
           let r = use c a in
           let r = if ext = Some F.Sx then sx c (width t) r else r in
           match loc with
-          | Lreg p -> pending := Mreg (p, r) :: !pending
+          | Lreg p ->
+              pending := Mreg (p, r) :: !pending;
+              (* Floating arguments of a variadic call must also have a GPR
+                 image so an MS va_list can read them from home slots. *)
+              (match p with
+              | X k when sig_.ms_abi && sig_.variadic ->
+                  pass_gpr (Lreg (G ms_gpr_args.(k))) (to_gpr c (is_dbl t) r)
+              | _ -> ())
           | Lstack o ->
               if cls_of_ty t = Xmm then emit c (Fstore (is_dbl t, { (at Bout) with disp = o }, r))
               else emit c (Store (8, { (at Bout) with disp = o }, r)))
       | Pregs (size, l) -> pending := List.rev_append (load_eightbytes c size (use c a) l) !pending
       | Pstack (size, o) -> copy_bytes c ~src:(at_reg (use c a)) ~dst:{ (at Bout) with disp = o } size
-      | Pmem80 o -> copy_bytes c ~src:(addr80 c a) ~dst:{ (at Bout) with disp = o } 10)
+      | Pmem80 o -> copy_bytes c ~src:(addr80 c a) ~dst:{ (at Bout) with disp = o } 10
+      | Pms_bits (size, loc) ->
+          let r = fresh c Gpr in
+          emit c (Load (size, false, r, at_reg (use c a)));
+          pass_gpr loc r
+      | Pms_ref (abi, size, align, loc) ->
+          let p = aligned_mem c size (max 16 align) in
+          let src, bytes =
+            match abi with Scalar F.F80 -> (addr80 c a, 10) | _ -> (at_reg (use c a), size)
+          in
+          copy_bytes c ~src ~dst:(at_reg p) bytes;
+          pass_gpr loc p)
     plans;
   let sret_slot =
     match rp with
     | Rsret (size, align) ->
         let p = aligned_mem c size align in
-        pending := Mreg (G Rdi, p) :: !pending;
+        pending := Mreg (sret_reg sig_.ms_abi, p) :: !pending;
         Some p
     | Rmulti (_, Some (size, align)) ->
         let p = aligned_mem c size align in
-        pending := Mreg (G Rdi, p) :: !pending;
+        pending := Mreg (sret_reg sig_.ms_abi, p) :: !pending;
         Some p
     | _ -> None
   in
@@ -1505,14 +1601,15 @@ let call c ~(sig_ : F.signature) ~callee ~args ~attrs ~va_aggs results =
   emit_moves c pending;
   let arg_regs = List.map move_dst pending in
   let arg_regs =
-    if sig_.variadic then begin
+    if sig_.variadic && not sig_.ms_abi then begin
       emit c (Movi (G Rax, Int64.of_int nx));
       G Rax :: arg_regs
     end
     else arg_regs
   in
-  emit c (Call { target; args = arg_regs; rets = ret_regs rp; rtwice = attrs land F.a_returns_twice <> 0 });
-  match (rp, results) with
+  let rets = if discard_results then [] else ret_regs rp in
+  emit c (Call { target; args = arg_regs; rets; rtwice = attrs land F.a_returns_twice <> 0 });
+  if not discard_results then match (rp, results) with
   | Rnone, _ -> ()
   | Rx87 (false, 1), [| v |] -> pop80 c v
   | Rx87 (true, n), [| v |] ->
@@ -1562,18 +1659,26 @@ let call c ~(sig_ : F.signature) ~callee ~args ~attrs ~va_aggs results =
 
 let params c =
   let sig_ = c.fn.sig_ in
-  let rp = plan_ret sig_.result_abis in
+  let rp = call_ret_plan sig_ in
   let sret = hidden_ptr rp in
-  if sret then c.sret <- Some (copy c (G Rdi));
-  let plans, stack, _ = plan_args ~sret sig_.param_abis in
-  if sig_.variadic then begin
+  if sret then c.sret <- Some (copy c (sret_reg sig_.ms_abi));
+  let plans, stack, _ = call_arg_plans sig_.ms_abi ~sret sig_.param_abis in
+  if sig_.variadic && sig_.ms_abi then begin
+    let first = List.length plans + (if sret then 1 else 0) in
+    (* Home the unnamed register arguments in the caller's save area,
+       contiguous with the unnamed arguments that are already on stack. *)
+    for i = first to 3 do
+      emit c (Store (8, { (at Bin) with disp = 8 * i }, G ms_gpr_args.(i)))
+    done
+  end else if sig_.variadic then begin
     (* the register save area: rdi..r9 at 0..40, xmm0..7 at 48, 64, ... 160
        (all 16 bytes: a vector in a struct reads both halves back) *)
-    let s = new_slot c.mf ~size:176 ~align:16 in
+    let s = new_slot c.mf ~size:(if c.no_sse then 48 else 176) ~align:16 in
     Array.iteri (fun i r -> emit c (Store (8, slot_addr ~disp:(8 * i) s, G r))) gpr_args;
-    for i = 0 to 7 do
-      emit c (Xstore (slot_addr ~disp:(48 + (16 * i)) s, X i))
-    done;
+    if not c.no_sse then
+      for i = 0 to 7 do
+        emit c (Xstore (slot_addr ~disp:(48 + (16 * i)) s, X i))
+      done;
     let in_parts k = List.fold_left (fun n p -> match p with Pregs (_, l) -> n + k (count_parts (List.map (fun (o, e, _) -> (o, e)) l)) | _ -> n) 0 plans in
     let gp = List.length (List.filter (function Pscalar (_, _, Lreg (G _)) -> true | _ -> false) plans)
              + in_parts fst
@@ -1581,10 +1686,17 @@ let params c =
     and fp = List.length (List.filter (function Pscalar (_, _, Lreg (X _)) -> true | _ -> false) plans)
              + in_parts snd
     in
-    c.va <- Some (gp, fp, stack, s)
+    c.va <- Some (gp, (if c.no_sse then 8 else fp), stack, s)
   end;
   let ps = (F.block c.fn F.entry).params in
   if Array.length ps <> List.length plans then unsupported "entry parameters do not match the signature";
+  let receive_gpr = function
+    | Lreg p -> copy c p
+    | Lstack o ->
+        let r = fresh c Gpr in
+        emit c (Load (8, false, r, { (at Bin) with disp = o }));
+        r
+  in
   List.iteri
     (fun i plan ->
       let v = ps.(i) in
@@ -1611,12 +1723,17 @@ let params c =
           let r = fresh c Gpr in
           emit c (Lea (r, { (at Bin) with disp = o }));
           def c v r
-      | Pmem80 o -> copy80 c ~src:{ (at Bin) with disp = o } v)
+      | Pmem80 o -> copy80 c ~src:{ (at Bin) with disp = o } v
+      | Pms_bits (size, loc) ->
+          def c v (spill_eightbytes c size [ (0, Eint, receive_gpr loc) ])
+      | Pms_ref (abi, _, _, loc) ->
+          let p = receive_gpr loc in
+          match abi with Scalar F.F80 -> copy80 c ~src:(at_reg p) v | _ -> def c v p)
     plans
 
 let ret c vals =
   let sig_ = c.fn.sig_ in
-  match (plan_ret sig_.result_abis, vals) with
+  match (call_ret_plan sig_, vals) with
   | Rnone, [||] -> set_term c (Ret [])
   | Rx87 (false, 1), [| v |] ->
       fld80 c (addr80 c v);
@@ -1670,9 +1787,9 @@ let ret c vals =
       set_term c (Ret (List.map move_dst moves))
   | _ -> unsupported "return value count"
 
-(* r := r rounded up to [align] when that is more than the 16 the stack gives *)
+(* r := r rounded up to [align] when that is more than the stack gives *)
 let round_up_ptr c r align =
-  if align > 16 then begin
+  if align > c.stack_align then begin
     emit c (Alui (Add, r, align - 1));
     emit c (Alui (And, r, - align))
   end
@@ -1686,18 +1803,27 @@ let va_info c =
   match c.va with Some v -> v | None -> unsupported "va_start in a function that is not variadic"
 
 let va_start c p =
-  let gp, fp, stack, s = va_info c in
-  let rp = use c p in
-  let t1 = movi c (Int64.of_int (8 * gp)) in
-  emit c (Store (4, at_reg rp, t1));
-  let t2 = movi c (Int64.of_int (48 + (16 * fp))) in
-  emit c (Store (4, { (at_reg rp) with disp = 4 }, t2));
-  let t3 = fresh c Gpr in
-  emit c (Lea (t3, { (at Bin) with disp = stack }));
-  emit c (Store (8, { (at_reg rp) with disp = 8 }, t3));
-  let t4 = fresh c Gpr in
-  emit c (Lea (t4, slot_addr s));
-  emit c (Store (8, { (at_reg rp) with disp = 16 }, t4))
+  if c.fn.sig_.ms_abi then begin
+    let sig_ = c.fn.sig_ in
+    let first = List.length sig_.param_abis +
+      (if hidden_ptr (call_ret_plan sig_) then 1 else 0) in
+    let cursor = fresh c Gpr in
+    emit c (Lea (cursor, { (at Bin) with disp = 8 * first }));
+    emit c (Store (8, at_reg (use c p), cursor))
+  end else begin
+    let gp, fp, stack, s = va_info c in
+    let rp = use c p in
+    let t1 = movi c (Int64.of_int (8 * gp)) in
+    emit c (Store (4, at_reg rp, t1));
+    let t2 = movi c (Int64.of_int (48 + (16 * fp))) in
+    emit c (Store (4, { (at_reg rp) with disp = 4 }, t2));
+    let t3 = fresh c Gpr in
+    emit c (Lea (t3, { (at Bin) with disp = stack }));
+    emit c (Store (8, { (at_reg rp) with disp = 8 }, t3));
+    let t4 = fresh c Gpr in
+    emit c (Lea (t4, slot_addr s));
+    emit c (Store (8, { (at_reg rp) with disp = 16 }, t4))
+  end
 
 (* the next [size] bytes (rounded to 8) of the overflow area, aligned to
    [align]: returns their address and advances the va_list *)
@@ -1802,7 +1928,7 @@ let phys_of_name n =
         match n with
         | "rax" -> Rax | "rbx" -> Rbx | "rcx" -> Rcx | "rdx" -> Rdx | "rsi" -> Rsi | "rdi" -> Rdi
         | "r8" -> R8 | "r9" -> R9 | "r10" -> R10 | "r11" -> R11 | "r12" -> R12 | "r13" -> R13
-        | "r14" -> R14 | "r15" -> R15
+        | "r14" -> R14 | "r15" -> R15 | "rsp" -> Rsp
         | _ -> invalid_arg ("Mir_isel.phys_of_name " ^ n))
 
 (* the order operands take registers in: caller-saved first, then the
@@ -1844,8 +1970,8 @@ let sext_const w (k : int64) = if w >= 64 then k else Int64.shift_right (Int64.s
    (as GCC allows). *)
 (* [labels]: the blocks an asm goto may jump to; the template names them
    %lN after the operands, as their block symbols *)
-let asm ?(labels = [||]) cx (ir : F.inst_rec) ~tmpl ~aflags ~(outs : F.asm_operand array)
-    ~(ins : F.asm_operand array) ~aargs ~clobbers =
+let asm_core ?(labels = [||]) cx (ir : F.inst_rec) ~tmpl ~aflags ~(outs : F.asm_operand array)
+    ~(ins : F.asm_operand array) ~aargs ~clobbers : unit -> unit =
   let intel = aflags land F.asm_intel <> 0 in
   let pairs l = Array.map (fun (o : F.asm_operand) -> (o.aname, o.acon)) l in
   let st =
@@ -1872,10 +1998,12 @@ let asm ?(labels = [||]) cx (ir : F.inst_rec) ~tmpl ~aflags ~(outs : F.asm_opera
     if not (Fir_asm.indirect (con k)) then
       match oty k with
       | F.Int w when w <= 64 -> ()
-      | F.Ptr _ | F.F32 | F.F64 -> ()
+      | F.Ptr _ | F.F32 | F.F64 | F.F80 | F.Vec (2, F.Int 64) -> ()
       | t -> unsupported "asm operand %d of type %s" k (F.ty_to_string t)
   done;
   let clob_names = List.filter_map (function Fir_asm.Creg r -> Some r | _ -> None) st.clob in
+  let clob_st0 = List.exists (function Fir_asm.Cx87 0 -> true | _ -> false) st.clob in
+  let clob_st1 = List.exists (function Fir_asm.Cx87 1 -> true | _ -> false) st.clob in
   (* registers taken: by outputs (with their early-clobber mark), by inputs
      (read-write outputs and memory addresses included) *)
   let out_used = Hashtbl.create 8 and in_used = Hashtbl.create 8 in
@@ -1885,10 +2013,11 @@ let asm ?(labels = [||]) cx (ir : F.inst_rec) ~tmpl ~aflags ~(outs : F.asm_opera
     match oty k with
     | F.Int w -> if w <= 8 then 8 else if w <= 16 then 16 else if w <= 32 then 32 else 64
     | F.F32 -> 32
+    | F.Vec (2, F.Int 64) -> 128
     | _ -> 64
   in
   let size_of k = match oty k with F.Int w -> (w + 7) / 8 | t -> F.size_of t in
-  let prefers_xmm k = match oty k with F.F32 | F.F64 -> true | _ -> false in
+  let prefers_xmm k = match oty k with F.F32 | F.F64 | F.Vec (2, F.Int 64) -> true | _ -> false in
   (* the first register in [l] (or of operand k's constraint) that [ok] accepts *)
   let pick_in l ok = List.find_opt (fun r -> (not (List.mem r clob_names)) && ok r) l in
   let pick k ok =
@@ -1897,7 +2026,8 @@ let asm ?(labels = [||]) cx (ir : F.inst_rec) ~tmpl ~aflags ~(outs : F.asm_opera
   in
   let place k r =
     reg_of.(k) <- Some r;
-    loc.(k) <- Areg (phys_of_name r, width_of k);
+    if Fir_asm.is_x87 r then loc.(k) <- Ax87 (Fir_asm.x87_idx r)
+    else loc.(k) <- Areg (phys_of_name r, width_of k);
     if is_out k then begin
       Hashtbl.replace out_used r (con k).early;
       if (con k).dir = Fir_asm.Inout then Hashtbl.replace in_used r ()
@@ -1937,12 +2067,17 @@ let asm ?(labels = [||]) cx (ir : F.inst_rec) ~tmpl ~aflags ~(outs : F.asm_opera
     | Some v -> (
         match F.const_of cx.fn v with
         | Some (Cint (t, l)) -> (
-            let x = sext_const (match t with F.Int w -> w | _ -> 64) l.(0) in
+            (* A C _Bool true is 1, as in clang; wider integers keep their
+               sign. The kernel's jump table adds a bool "i" to a key
+               address, and -1 there marks the key as linked. *)
+            let x = match t with F.Int 1 -> Int64.logand l.(0) 1L | F.Int w -> sext_const w l.(0) | _ -> l.(0) in
             match c.imm with Some ok when ok x -> Some (Aimm x) | _ -> None)
         | Some (Czero _ | Cnull _) when c.imm <> None -> Some (Aimm 0L)
-        | Some (Csym (name, add))
-          when c.sym && (not (Hashtbl.mem cx.tls_syms name)) && ((not cx.pic) || Hashtbl.mem cx.local_syms name) ->
-            Some (Asym (name, add))
+        | _ when c.sym -> (
+            match sym_plus cx.fn v with
+            | Some (name, add) when not (Hashtbl.mem cx.tls_syms name) &&
+                (not cx.pic || Hashtbl.mem cx.local_syms name) -> Some (Asym (name, add))
+            | _ -> None)
         | _ -> None)
   in
   let fixed k = match (con k).regs with [ _ ] -> (con k).tied = None | _ -> false in
@@ -1950,7 +2085,13 @@ let asm ?(labels = [||]) cx (ir : F.inst_rec) ~tmpl ~aflags ~(outs : F.asm_opera
      3. immediates and other inputs, 4. memory operands *)
   for k = 0 to n - 1 do
     let c = con k in
-    if c.flag = None && (not (Fir_asm.indirect c)) && fixed k then
+    (* A named rsp operand denotes the current hardware stack pointer.
+       Neither the allocator nor an operand copy may define this register. *)
+    if c.regs = ["rsp"] then begin
+      (match oty k with F.Int 64 | F.Ptr _ -> () | _ -> unsupported "asm rsp operand must be 64-bit");
+      place k "rsp"
+    end
+    else if c.flag = None && (not (Fir_asm.indirect c)) && fixed k then
       if is_out k then begin
         let r = List.hd c.regs in
         if Hashtbl.mem out_used r then unsupported "asm outputs share %s" r;
@@ -1977,7 +2118,8 @@ let asm ?(labels = [||]) cx (ir : F.inst_rec) ~tmpl ~aflags ~(outs : F.asm_opera
         match reg_of.(t) with
         | Some r ->
             reg_of.(k) <- Some r;
-            loc.(k) <- Areg (phys_of_name r, width_of k)
+            if Fir_asm.is_x87 r then loc.(k) <- Ax87 (Fir_asm.x87_idx r)
+            else loc.(k) <- Areg (phys_of_name r, width_of k)
         | None -> unsupported "asm input %d is tied to output %d, which has no register" (k - nout) t)
     | None -> ()
   done;
@@ -2008,8 +2150,10 @@ let asm ?(labels = [||]) cx (ir : F.inst_rec) ~tmpl ~aflags ~(outs : F.asm_opera
       match Hashtbl.find_opt cx.frame (F.resolve cx.fn p) with
       | Some s -> loc.(k) <- Amem (slot_addr s, size)
       | None -> (
-          match F.const_of cx.fn p with
-          | Some (Csym (name, add))
+          (* A field of a global stays rip-relative too: the kernel's
+             paravirt call sites must be exactly call *pv_ops+off(%rip). *)
+          match sym_plus cx.fn p with
+          | Some (name, add)
             when fits32 add
                  && (not (Hashtbl.mem cx.tls_syms name))
                  && ((not cx.pic) || Hashtbl.mem cx.local_syms name) ->
@@ -2032,16 +2176,36 @@ let asm ?(labels = [||]) cx (ir : F.inst_rec) ~tmpl ~aflags ~(outs : F.asm_opera
   (* the sources, all computed before any physical register is written:
      materializing one may take a call *)
   let srcs = ref [] in
+  let in_st0 = ref None and in_st1 = ref None in
   for k = 0 to n - 1 do
     let c = con k in
     let reads = (not (is_out k)) || c.dir = Fir_asm.Inout in
     if reads && not (Fir_asm.indirect c) then
       match loc.(k) with
+      | Areg (G Rsp, _) -> ()
       | Areg (r, _) -> srcs := (r, use cx (Option.get value.(k)), oty k) :: !srcs
+      | Ax87 0 -> in_st0 := Some (k, Option.get value.(k))
+      | Ax87 1 -> in_st1 := Some (k, Option.get value.(k))
       | _ -> ()
   done;
   let addr_srcs = List.map (fun (r, p) -> (r, use cx p, F.ptr)) !addr_regs in
   let stack_srcs = List.map (fun (k, s) -> (k, s, use cx (Option.get value.(k)))) !stack_inputs in
+  let push_x87 k v =
+    match oty k with
+    | F.F80 -> fld80 cx (addr80 cx v)
+    | F.F64 ->
+        let s = new_slot cx.mf ~size:8 ~align:8 in
+        emit cx (Fstore (true, slot_addr s, use cx v));
+        x87 cx (Fld (M64, slot_addr s))
+    | F.F32 ->
+        let s = new_slot cx.mf ~size:4 ~align:4 in
+        emit cx (Fstore (false, slot_addr s, use cx v));
+        x87 cx (Fld (M32, slot_addr s))
+    | t -> unsupported "x87 asm input of type %s" (F.ty_to_string t)
+  in
+  (* x87 stack is LIFO: push st(1) first, then st(0) so st(0) is on top *)
+  Option.iter (fun (k, v) -> push_x87 k v) !in_st1;
+  Option.iter (fun (k, v) -> push_x87 k v) !in_st0;
   List.iter
     (fun (k, s, v) ->
       match oty k with
@@ -2063,7 +2227,9 @@ let asm ?(labels = [||]) cx (ir : F.inst_rec) ~tmpl ~aflags ~(outs : F.asm_opera
       (List.filter_map
          (fun k ->
            let c = con k in
-           if c.flag = None && not (Fir_asm.indirect c) then Option.map phys_of_name reg_of.(k) else None)
+           if c.flag = None && not (Fir_asm.indirect c) then
+             match reg_of.(k) with Some r when r <> "rsp" && not (Fir_asm.is_x87 r) -> Some (phys_of_name r) | _ -> None
+           else None)
          (List.init nout Fun.id))
   in
   emit cx
@@ -2085,44 +2251,77 @@ let asm ?(labels = [||]) cx (ir : F.inst_rec) ~tmpl ~aflags ~(outs : F.asm_opera
          aout;
          aclob = dedup (List.map phys_of_name clob_names);
        });
-  (* flag outputs right away, then the outputs out of their registers *)
-  let flag_vals =
-    List.filter_map
-      (fun k ->
-        match (con k).flag with
-        | Some cc ->
-            let d = fresh cx Gpr in
-            emit cx (Setcc (cond_of_cc cc, d));
-            Some (k, d)
-        | None -> None)
-      (List.init nout Fun.id)
+  (* pre-allocate virtual registers for results so asm_goto can define them on every outgoing edge *)
+  let out_st0 = ref None and out_st1 = ref None in
+  let res_vregs =
+    let next = ref 0 in
+    Array.init nout (fun k ->
+      let c = con k in
+      if Fir_asm.output_is_result c then begin
+        let res = ir.results.(!next) in
+        incr next;
+        match loc.(k) with
+        | Ax87 0 ->
+            let d_opt = if oty k = F.F80 then None else Some (vreg cx res) in
+            out_st0 := Some (k, res, d_opt);
+            None
+        | Ax87 1 ->
+            let d_opt = if oty k = F.F80 then None else Some (vreg cx res) in
+            out_st1 := Some (k, res, d_opt);
+            None
+        | _ -> Some (vreg cx res)
+      end
+      else None)
   in
-  let next = ref 0 in
-  for k = 0 to nout - 1 do
-    let c = con k in
-    if Fir_asm.output_is_result c then begin
-      let res = ir.results.(!next) in
-      incr next;
-      match List.assoc_opt k flag_vals with
-      | Some d -> def cx res d
-      | None -> (
+  fun () ->
+    let pop_x87 k res d_opt =
+      match oty k with
+      | F.F80 -> pop80 cx res
+      | F.F64 ->
+          let s = new_slot cx.mf ~size:8 ~align:8 in
+          x87 cx (Fstp (M64, slot_addr s));
+          emit cx (Fload (true, Option.get d_opt, slot_addr s))
+      | F.F32 ->
+          let s = new_slot cx.mf ~size:4 ~align:4 in
+          x87 cx (Fstp (M32, slot_addr s));
+          emit cx (Fload (false, Option.get d_opt, slot_addr s))
+      | t -> unsupported "x87 asm output of type %s" (F.ty_to_string t)
+    in
+    (* x87 stack cleanup: pop st(0) first (output or unpopped input), then st(1) *)
+    (match !out_st0 with
+    | Some (k, res, d_opt) -> pop_x87 k res d_opt
+    | None -> if !in_st0 <> None && not clob_st0 then x87 cx Fpop);
+    (match !out_st1 with
+    | Some (k, res, d_opt) -> pop_x87 k res d_opt
+    | None -> if !in_st1 <> None && not clob_st1 then x87 cx Fpop);
+    (* flag outputs right away, then the outputs out of their registers *)
+    for k = 0 to nout - 1 do
+      match ((con k).flag, res_vregs.(k)) with
+      | Some cc, Some d -> emit cx (Setcc (cond_of_cc cc, d))
+      | _ -> ()
+    done;
+    for k = 0 to nout - 1 do
+      match ((con k).flag, res_vregs.(k)) with
+      | None, Some d ->
           let r = phys_of_name (Option.get reg_of.(k)) in
           let t = oty k in
-          let d = fresh cx (cls_of_ty t) in
           (match (r, cls_of_ty t) with
+          | G Rsp, Gpr -> emit cx (Spget d)
           | G _, Gpr | X _, Xmm -> emit cx (Copy (d, r))
           | X _, Gpr -> emit cx (Movxg (true, d, r))
           | G _, Xmm -> emit cx (Movgx (t = F.F64, d, r))
           | V _, _ -> assert false);
           (match t with
           | F.Int w when w < 64 -> norm cx (if w <= 8 && w > 1 then 8 else if w <= 16 && w > 1 then 16 else if w = 1 then 1 else 32) d
-          | _ -> ());
-          def cx res d)
-    end
-  done
+          | _ -> ())
+      | _ -> ()
+    done
+
+let asm ?(labels = [||]) cx (ir : F.inst_rec) ~tmpl ~aflags ~outs ~ins ~aargs ~clobbers =
+  (asm_core ~labels cx ir ~tmpl ~aflags ~outs ~ins ~aargs ~clobbers) ()
 
 
-let inst c i =
+let inst ~before_unreachable c i =
   let ir = F.inst c.fn i in
   let res k = ir.results.(k) in
   let rty () = ty c (res 0) in
@@ -2139,7 +2338,7 @@ let inst c i =
       (* a call to the correctly rounded helper Mir_runtime.add appended *)
       match rty () with
       | (F.F32 | F.F64) as t ->
-          let sig_ = { F.param_abis = [ Scalar t; Scalar t; Scalar t ]; result_abis = [ Scalar t ]; variadic = false } in
+          let sig_ = { F.param_abis = [ Scalar t; Scalar t; Scalar t ]; result_abis = [ Scalar t ]; variadic = false; ms_abi = false; ms_xmm_result = false } in
           call c ~sig_ ~callee:(F.Direct (Mir_runtime.fma_name (t = F.F64))) ~args:[| a; b; d |] ~attrs:0 ~va_aggs:[] ir.results
       | t -> unsupported "fma of %s" (F.ty_to_string t))
   | Fsh (left, a, b, n) -> set (funnel c left (width (rty ())) a b n)
@@ -2150,8 +2349,9 @@ let inst c i =
   | Icmp (p, a, b) ->
       (match ty c a with F.Vec _ -> unsupported "vector icmp" | _ -> ());
       set (icmp c p a b)
-  | Fcmp (p, _, a, b) when is80 (ty c a) -> set (fcmp_with c p (ucomi80 c) (addr80 c a) (addr80 c b))
-  | Fcmp (p, _, a, b) -> set (fcmp c p a b)
+  | Fcmp (p, fl, a, b) when is80 (ty c a) ->
+      set (fcmp_with c p (ucomi80 ~signaling:(F.has fl F.f_signaling) c) (addr80 c a) (addr80 c b))
+  | Fcmp (p, fl, a, b) -> set (fcmp c p (F.has fl F.f_signaling) a b)
   | Select (cnd, x, y) when is80 (rty ()) ->
       select80 c (res 0) (use c cnd) (addr80 c x) (addr80 c y)
   | (Freeze a | Mark (_, a)) when is80 (rty ()) -> copy80 c ~src:(addr80 c a) (res 0)
@@ -2198,22 +2398,24 @@ let inst c i =
       match F.int_value c.fn n with
       | Some k when c.fir_block = F.entry && Int64.compare k 0L >= 0 && Int64.compare k 0x1000_0000L < 0 ->
           if align > 0x1000 then unsupported "alloca with align %d" align;
-          (* frame slots are at most 16-aligned (rbp is): a larger alignment
-             takes align - 16 extra bytes and rounds the address up *)
-          let extra = max 0 (align - 16) in
+          (* frame slots are at most stack_align-aligned (rbp is): a larger
+             alignment takes align - stack_align extra bytes and rounds the
+             address up *)
+          let extra = max 0 (align - c.stack_align) in
           let s = new_slot c.mf ~size:(max 1 (Int64.to_int k) + extra) ~align:(min 16 (max 1 align)) in
           let t = fresh c Gpr in
           emit c (Lea (t, slot_addr s));
           round_up_ptr c t align;
-          if align <= 16 then Hashtbl.replace c.frame (F.resolve c.fn (res 0)) s;
+          if align <= c.stack_align then Hashtbl.replace c.frame (F.resolve c.fn (res 0)) s;
           set t
       | _ ->
           if align > 0x1000 then unsupported "alloca with align %d" align;
-          (* Salloc returns a 16-aligned block; see above for larger alignments *)
+          (* Salloc returns a stack_align-aligned block; see above for
+             larger alignments *)
           let t = copy c (use c n) in
           emit c (Alui (Add, t, 15));
           emit c (Alui (And, t, -16));
-          if align > 16 then emit c (Alui (Add, t, align - 16));
+          if align > c.stack_align then emit c (Alui (Add, t, align - c.stack_align));
           let d = fresh c Gpr in
           emit c (Salloc (d, t));
           round_up_ptr c d align;
@@ -2226,19 +2428,24 @@ let inst c i =
       let t = rty () in
       let addr = addr_of c p in
       let r = fresh c (cls_of_ty t) in
-      if cls_of_ty t = Xmm then emit c (Fload (is_dbl t, r, addr))
-      else emit c (Load (mem_size t, false, r, addr));
+      (match t with
+      | F.Vec (2, F.Int 64) -> emit c (Xload (r, addr))
+      | _ when cls_of_ty t = Xmm -> emit c (Fload (is_dbl t, r, addr))
+      | _ -> emit c (Load (mem_size t, false, r, addr)));
       set r
   | Store (mem, v, p) ->
       let t = ty c v in
-      let size = mem_size t in
       let rv = use c v and addr = addr_of c p in
-      if mem.order = Seq_cst then begin
-        let x = if cls_of_ty t = Xmm then to_gpr c (is_dbl t) rv else copy c rv in
-        emit c (Xchg (size, addr, x))
-      end
-      else if cls_of_ty t = Xmm then emit c (Fstore (is_dbl t, addr, rv))
-      else emit c (Store (size, addr, rv))
+      (match t with
+      | F.Vec (2, F.Int 64) -> emit c (Xstore (addr, rv))
+      | _ ->
+          let size = mem_size t in
+          if mem.order = Seq_cst then begin
+            let x = if cls_of_ty t = Xmm then to_gpr c (is_dbl t) rv else copy c rv in
+            emit c (Xchg (size, addr, x))
+          end
+          else if cls_of_ty t = Xmm then emit c (Fstore (is_dbl t, addr, rv))
+          else emit c (Store (size, addr, rv)))
   | Ptradd (_, p, idx, scale, disp) -> set (ptradd c p idx scale disp)
   | Memcpy (_, d, s, n) ->
       let rd = use c d and rs = use c s and rn = use c n in
@@ -2277,7 +2484,9 @@ let inst c i =
       def c (res 1) (copy c (G Rdx));
       def c (res 2) ok
   | Fence o -> if o = Seq_cst then emit c Mfence
-  | Call { sig_; callee; args; attrs; va_aggs } -> call c ~sig_ ~callee ~args ~attrs ~va_aggs ir.results
+  | Call { sig_; callee; args; attrs; va_aggs } ->
+      let discard_results = before_unreachable && F.has attrs F.a_noreturn in
+      call ~discard_results c ~sig_ ~callee ~args ~attrs ~va_aggs ir.results
   | Syscall args ->
       let regs = [| G Rax; G Rdi; G Rsi; G Rdx; G R10; G R8; G R9 |] in
       if Array.length args > 7 then unsupported "syscall with %d operands" (Array.length args);
@@ -2383,12 +2592,47 @@ let term c (t : F.term) =
         targets;
       emit c (Copy (G R11, use c v));
       set_term c (Jmpr (G R11, Array.to_list targets))
-  | Asm_goto { tmpl; aflags; ins; aargs; clobbers; fall; labels } ->
+  | Asm_goto { tmpl; aflags; outs; ins; aargs; aresults; clobbers; fall; labels } ->
       Array.iter
         (fun b -> if Array.length (F.block c.fn b).params > 0 then unsupported "asm_goto to a block with parameters")
         (Array.append [| fall |] labels);
-      asm ~labels c { op = F.Nop; results = [||]; loc = 0 } ~tmpl ~aflags ~outs:[||] ~ins ~aargs ~clobbers;
-      set_term c (Asmgoto (fall, Array.to_list labels))
+      if Array.length aresults = 0 then begin
+        asm ~labels c { op = F.Nop; results = [||]; loc = 0 } ~tmpl ~aflags ~outs ~ins ~aargs ~clobbers;
+        set_term c (Asmgoto (fall, Array.to_list labels))
+      end
+      else begin
+        (* Output copies must execute on BOTH the fallthrough edge and every
+           indirect label edge (C23 / Clang 16+ semantics). Route every edge
+           through a dedicated trampoline block that copies outputs into their
+           virtual registers before jumping to the real target. *)
+        let fall_tramp = new_block c.mf in
+        let tramp_of = Hashtbl.create 4 in
+        let tramps = ref [ (fall_tramp, fall) ] in
+        let tramp_labels =
+          Array.map
+            (fun b ->
+              match Hashtbl.find_opt tramp_of b with
+              | Some tb -> tb
+              | None ->
+                  let tb = new_block c.mf in
+                  Hashtbl.replace tramp_of b tb;
+                  tramps := (tb, b) :: !tramps;
+                  tb)
+            labels
+        in
+        let emit_out =
+          asm_core ~labels:tramp_labels c { op = F.Nop; results = aresults; loc = 0 } ~tmpl ~aflags ~outs ~ins ~aargs ~clobbers
+        in
+        set_term c (Asmgoto (fall_tramp, Array.to_list tramp_labels));
+        let saved_cur = c.cur in
+        List.iter
+          (fun (tb, real_b) ->
+            c.cur <- tb;
+            emit_out ();
+            set_term c (Jmp real_b))
+          (List.rev !tramps);
+        c.cur <- saved_cur
+      end
 
 (* ---------- entry ---------- *)
 
@@ -2453,6 +2697,9 @@ let promotable_allocas (fn : F.func) =
   if Hashtbl.length cand > 0 then begin
     let r = F.resolve fn in
     let bad v = Hashtbl.remove cand (r v) in
+    (* An unoptimized C debug slot must remain readable after the last
+       machine use, including when the register allocator reuses registers. *)
+    List.iter (fun (d : F.dvar) -> if d.vstack then Option.iter bad d.home) fn.vars;
     let access p t =
       let p = r p in
       match Hashtbl.find_opt cand p with
@@ -2531,13 +2778,15 @@ let promotable_allocas (fn : F.func) =
       cells
   end
 
-let select ~pic ?(tls_gd = false) (e : env) (fn : F.func) =
-  let mf = Mir.create fn.name in
+let select ~pic ?(kernel_model = false) ?(no_sse = false) ?(general_regs_only = false) ?(no_x87 = false) ?(tls_gd = false) ?(stack_align = 16) (e : env) (fn : F.func) =
+  (* Integer-only Microsoft x64 code, such as EFI stubs, keeps the integer
+     calling convention but cannot touch XMM registers in the prologue. *)
+  let mf = Mir.create ~ms_abi:fn.sig_.ms_abi ~no_sse fn.name in
   for _ = 1 to F.num_blocks fn do
     ignore (new_block mf)
   done;
   let c =
-    { fn; mf; pic; tls_gd; local_syms = e.local_syms; label_funcs = e.label_funcs; tls_syms = e.tls_syms; vals = Hashtbl.create 256;
+    { fn; mf; pic; kernel_model; no_sse; stack_align; tls_gd; local_syms = e.local_syms; label_funcs = e.label_funcs; tls_syms = e.tls_syms; vals = Array.make (F.num_values fn) None;
       cur = 0; fir_block = 0; sret = None; va = None; blk_refs = e.blk_refs;
       frame = Hashtbl.create 16;
       f80 = Hashtbl.create 8;
@@ -2561,7 +2810,10 @@ let select ~pic ?(tls_gd = false) (e : env) (fn : F.func) =
     (fun b (blk : F.block_rec) ->
       c.cur <- b;
       c.fir_block <- b;
-      F.Vec.iter (fun i -> mark (F.inst fn i).loc; inst c i) blk.insts;
+      let last_inst = F.Vec.length blk.insts - 1 in
+      F.Vec.iteri (fun index i ->
+        mark (F.inst fn i).loc;
+        inst ~before_unreachable:(index = last_inst && blk.term = F.Unreachable) c i) blk.insts;
       mark blk.term_loc;
       term c blk.term)
     fn.blocks;
@@ -2575,11 +2827,22 @@ let select ~pic ?(tls_gd = false) (e : env) (fn : F.func) =
            | None -> []
            | Some v -> (
                let v = F.resolve fn v in
-               match (Hashtbl.find_opt c.frame v, Hashtbl.find_opt c.cells v, Hashtbl.find_opt c.vals v) with
+               match (Hashtbl.find_opt c.frame v, Hashtbl.find_opt c.cells v, c.vals.(v)) with
                | Some s, _, _ -> [ (i, Hslot s) ]
                | _, Some (V r, _), _ -> [ (i, Hcell r) ]
                | _, _, Some (V r) -> [ (i, Hptr r) ]
                | _ -> []))
          fn.vars);
   mf.zeroize <- F.has fn.fattrs F.fa_secret || Hashtbl.length mf.marks > 0;
+  if no_sse &&
+     (mf.zeroize || Dynarray.exists ((=) Xmm) mf.vcls ||
+      Dynarray.exists (fun b -> List.exists (fun i ->
+        List.exists (function X _ -> true | _ -> false) (all_regs i)) b.code) mf.blocks)
+  then unsupported "@%s: SSE registers are disabled" fn.name;
+  (* -mno-80387 (and -mgeneral-regs-only): no x87 instruction at all. That
+     refuses f80 (C long double, as gcc and clang do), asm x87 operands
+     and frem, which is an fprem loop here (gcc and clang call fmod) *)
+  if (no_x87 || general_regs_only) && Dynarray.exists (fun b ->
+      List.exists (function X87 _ | Frem87 _ -> true | _ -> false) b.code) mf.blocks
+  then unsupported "@%s: x87 registers are disabled (f80, or frem)" fn.name;
   mf

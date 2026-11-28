@@ -73,6 +73,7 @@ fn parse_reg_token() u16 fails {
         try as_err(c"expected '%' before register")
     }
     ac.pos += 1
+    skip_hspace()
     p addr = ac.src.p
     n u64 = ac.src.n
     start u64 = ac.pos
@@ -99,6 +100,28 @@ fn parse_reg_token() u16 fails {
     r u16 = reg_parse(rname)
     if r == 0 { try as_err_b(c"unknown register: %", rname) }
     return r
+}
+
+// An AT&T operand may use a .set alias in place of a percent register.
+fn parse_optional_register() u16 fails {
+    skip_hspace()
+    if ac.pos >= ac.src.n { return 0 }
+    c u8 = ac.src.p[u8, ac.pos]
+    if c == 37 { return try parse_reg_token() }
+    if !is_ident_start(c) { return 0 }
+    start u64 = ac.pos
+    name Bytes = try parse_ident()
+    sid u32 = map_get(&ac.sym_map, name) catch AS_NONE
+    if sid != AS_NONE {
+        sym handle[Symbol] = sym_at(sid)
+        if sym.is_equ {
+            val EvalVal = {}
+            eval_expr(sym.equ_expr, false, &val)
+            if val.kind == EV_REGISTER { return trunc[u16](bitcast[u64](val.val)) }
+        }
+    }
+    ac.pos = start
+    return 0
 }
 
 // Parses optional AVX-512 operand decorators: {%k1..%k7}, {z}, {1toN}.
@@ -157,8 +180,8 @@ fn parse_operand(out handle[Operand], is_branch_mnem bool) void fails {
     }
 
     // Register or segment-prefixed memory operand: %reg or %seg:disp(base,idx,scale)
-    if ac.pos < n && p[u8, ac.pos] == 37 {
-        r u16 = try parse_reg_token()
+    r u16 = try parse_optional_register()
+    if r != 0 {
         skip_hspace()
         if ac.pos < n && p[u8, ac.pos] == 58 { // ':' -> segment override
             if reg_class(r) != RC_SEG { try as_err(c"expected segment register before ':'") }
@@ -175,7 +198,22 @@ fn parse_operand(out handle[Operand], is_branch_mnem bool) void fails {
 
     // Memory operand or branch target: [disp][(base[,index[,scale]])]
     skip_hspace()
-    if ac.pos < n && p[u8, ac.pos] != 40 {
+    is_address_tuple bool = false
+    if ac.pos < n && p[u8, ac.pos] == 40 {
+        next u64 = ac.pos + 1
+        while next < n && is_hspace(p[u8, next]) { next += 1 }
+        if next < n {
+            ch u8 = p[u8, next]
+            is_address_tuple = ch == 37 || ch == 44 || ch == 41
+            if !is_address_tuple && is_ident_start(ch) {
+                start u64 = ac.pos
+                ac.pos = next
+                is_address_tuple = (try parse_optional_register()) != 0
+                ac.pos = start
+            }
+        }
+    }
+    if ac.pos < n && !is_address_tuple {
         out.expr = try parse_expr()
         out.has_disp = true
         skip_hspace()
@@ -186,15 +224,13 @@ fn parse_operand(out handle[Operand], is_branch_mnem bool) void fails {
         ac.pos += 1
         skip_hspace()
         out.kind = OPK_MEM
-        if ac.pos < n && p[u8, ac.pos] == 37 {
-            out.base = try parse_reg_token()
-            skip_hspace()
-        }
+        out.base = try parse_optional_register()
+        skip_hspace()
         if ac.pos < n && p[u8, ac.pos] == 44 { // ','
             ac.pos += 1
             skip_hspace()
-            if ac.pos < n && p[u8, ac.pos] == 37 {
-                out.index = try parse_reg_token()
+            out.index = try parse_optional_register()
+            if out.index != 0 {
                 out.scale = 1
                 skip_hspace()
             }
@@ -263,6 +299,11 @@ fn parse_data_directive(size u8) void fails {
     }
 }
 
+fn section_named(name Bytes, prefix addr) bool {
+    stem Bytes = bytes_c(prefix)
+    return bytes_eq(name, stem) || (name.n > stem.n && name.p[u8, stem.n] == 46 && bytes_starts_with(name, stem))
+}
+
 fn parse_section_directive(push bool) void fails {
     skip_hspace()
     name Bytes = bytes_empty()
@@ -288,15 +329,17 @@ fn parse_section_directive(push bool) void fails {
     group_name Bytes = bytes_empty()
     comdat bool = false
 
-    // Default flags for well-known sections when omitted
-    if bytes_is(name, c".text") { sh_flags = SHF_ALLOC | SHF_EXECINSTR }
-    else if bytes_is(name, c".data") { sh_flags = SHF_ALLOC | SHF_WRITE }
-    else if bytes_is(name, c".rodata") { sh_flags = SHF_ALLOC }
-    else if bytes_is(name, c".bss") { sh_type = SHT_NOBITS; sh_flags = SHF_ALLOC | SHF_WRITE }
-    else if bytes_is(name, c".tdata") { sh_flags = SHF_ALLOC | SHF_WRITE | SHF_TLS }
-    else if bytes_is(name, c".tbss") { sh_type = SHT_NOBITS; sh_flags = SHF_ALLOC | SHF_WRITE | SHF_TLS }
-    else if bytes_is(name, c".init_array") { sh_type = SHT_INIT_ARRAY; sh_flags = SHF_ALLOC | SHF_WRITE }
-    else if bytes_is(name, c".fini_array") { sh_type = SHT_FINI_ARRAY; sh_flags = SHF_ALLOC | SHF_WRITE }
+    // Conventional section families carry these flags even with explicit flags.
+    if section_named(name, c".text") { sh_flags = SHF_ALLOC | SHF_EXECINSTR }
+    else if section_named(name, c".data") { sh_flags = SHF_ALLOC | SHF_WRITE }
+    else if section_named(name, c".rodata") { sh_flags = SHF_ALLOC }
+    else if section_named(name, c".bss") { sh_type = SHT_NOBITS; sh_flags = SHF_ALLOC | SHF_WRITE }
+    else if section_named(name, c".tdata") { sh_flags = SHF_ALLOC | SHF_WRITE | SHF_TLS }
+    else if section_named(name, c".tbss") { sh_type = SHT_NOBITS; sh_flags = SHF_ALLOC | SHF_WRITE | SHF_TLS }
+    else if section_named(name, c".note") { sh_type = SHT_NOTE }
+    else if section_named(name, c".init_array") { sh_type = SHT_INIT_ARRAY; sh_flags = SHF_ALLOC | SHF_WRITE }
+    else if section_named(name, c".fini_array") { sh_type = SHT_FINI_ARRAY; sh_flags = SHF_ALLOC | SHF_WRITE }
+    else if section_named(name, c".preinit_array") { sh_type = SHT_PREINIT_ARRAY; sh_flags = SHF_ALLOC | SHF_WRITE }
 
     skip_hspace()
     if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 44 {
@@ -305,7 +348,6 @@ fn parse_section_directive(push bool) void fails {
         if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 34 {
             fb Buf = {}
             try parse_string_lit(&fb)
-            sh_flags = 0
             for i u64 in 0..fb.n {
                 fc u8 = fb.p[u8, i]
                 if fc == 97 { sh_flags = sh_flags | SHF_ALLOC }        // 'a'
@@ -412,6 +454,8 @@ fn emit_base64(s Bytes) void fails {
 }
 
 fn parse_directive(dir Bytes) void fails {
+    if bytes_is(dir, c".code32") { ac.code32 = true; return }
+    if bytes_is(dir, c".code64") { ac.code32 = false; return }
     if bytes_is(dir, c".text") {
         sid u32 = sec_get_or_create(bytes_c(c".text"), SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR, 0, bytes_empty(), false)
         sec_switch(sid)
@@ -492,11 +536,11 @@ fn parse_directive(dir Bytes) void fails {
         if ac.pos < ac.src.n && (ac.src.p[u8, ac.pos] == 64 || ac.src.p[u8, ac.pos] == 37) { ac.pos += 1 }
         tname Bytes = try parse_ident()
         st u8 = STT_NOTYPE
-        if bytes_is(tname, c"function") { st = STT_FUNC }
-        else if bytes_is(tname, c"object") { st = STT_OBJECT }
-        else if bytes_is(tname, c"tls_object") { st = STT_TLS }
-        else if bytes_is(tname, c"common") { st = STT_COMMON }
-        else if bytes_is(tname, c"gnu_indirect_function") { st = STT_GNU_IFUNC }
+        if bytes_is(tname, c"function") || bytes_is(tname, c"STT_FUNC") { st = STT_FUNC }
+        else if bytes_is(tname, c"object") || bytes_is(tname, c"STT_OBJECT") { st = STT_OBJECT }
+        else if bytes_is(tname, c"tls_object") || bytes_is(tname, c"STT_TLS") { st = STT_TLS }
+        else if bytes_is(tname, c"common") || bytes_is(tname, c"STT_COMMON") { st = STT_COMMON }
+        else if bytes_is(tname, c"gnu_indirect_function") || bytes_is(tname, c"STT_GNU_IFUNC") { st = STT_GNU_IFUNC }
         sym_at(sym_get_or_create(name)).stype = st
         return
     }
@@ -563,18 +607,20 @@ fn parse_directive(dir Bytes) void fails {
         return
     }
     if bytes_is(dir, c".macro") { try parse_macro_def(); return }
-    if bytes_is(dir, c".endm") { try as_err(c".endm without matching .macro"); return }
+    if bytes_is(dir, c".endm") || bytes_is(dir, c".endmacro") { try as_err(c".endm without matching .macro"); return }
     if bytes_is(dir, c".rept") { try parse_rept_directive(); return }
     if bytes_is(dir, c".irp") { try parse_irp_directive(false); return }
     if bytes_is(dir, c".irpc") { try parse_irp_directive(true); return }
     if bytes_is(dir, c".endr") { try as_err(c".endr without matching .rept/.irp/.irpc"); return }
     if bytes_is(dir, c".include") { try parse_include_directive(); return }
     if bytes_is(dir, c".incbin") { try parse_incbin_directive(); return }
+    if bytes_is(dir, c".altmacro") || bytes_is(dir, c".noaltmacro") {
+        ac.altmacro = bytes_is(dir, c".altmacro")
+        return
+    }
     if bytes_is(dir, c".if") {
         cond i64 = try eval_const_now(try parse_expr())
-        skip_to_eol()
-        if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 10 { ac.pos += 1; ac.line += 1 }
-        if cond != 0 { vec_push(&ac.if_stack, 1) } else { try skip_false_branch(true) }
+        try begin_asm_if(cond != 0)
         return
     }
     if bytes_is(dir, c".ifdef") || bytes_is(dir, c".ifndef") {
@@ -583,9 +629,7 @@ fn parse_directive(dir Bytes) void fails {
         sid u32 = map_get(&ac.sym_map, name) catch AS_NONE
         defd bool = sid != AS_NONE && sym_at(sid).defined
         if neg { defd = !defd }
-        skip_to_eol()
-        if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 10 { ac.pos += 1; ac.line += 1 }
-        if defd { vec_push(&ac.if_stack, 1) } else { try skip_false_branch(true) }
+        try begin_asm_if(defd)
         return
     }
     if bytes_is(dir, c".ifb") || bytes_is(dir, c".ifnb") {
@@ -593,9 +637,15 @@ fn parse_directive(dir Bytes) void fails {
         skip_hspace()
         blank bool = at_eol()
         if neg { blank = !blank }
-        skip_to_eol()
-        if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 10 { ac.pos += 1; ac.line += 1 }
-        if blank { vec_push(&ac.if_stack, 1) } else { try skip_false_branch(true) }
+        try begin_asm_if(blank)
+        return
+    }
+    if bytes_is(dir, c".ifc") || bytes_is(dir, c".ifnc") {
+        first Bytes = macro_argument(false, false)
+        if ac.pos >= ac.src.n || ac.src.p[u8, ac.pos] != 44 { try as_err(c"expected ',' in string comparison") }
+        ac.pos += 1
+        second Bytes = macro_argument(true, false)
+        try begin_asm_if(bytes_eq(first, second) != bytes_is(dir, c".ifnc"))
         return
     }
     if bytes_is(dir, c".ifeqs") || bytes_is(dir, c".ifnes") {
@@ -608,16 +658,13 @@ fn parse_directive(dir Bytes) void fails {
         try parse_string_lit(&b2)
         eq bool = bytes_eq(buf_bytes(&b1), buf_bytes(&b2))
         if neg { eq = !eq }
-        skip_to_eol()
-        if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 10 { ac.pos += 1; ac.line += 1 }
-        if eq { vec_push(&ac.if_stack, 1) } else { try skip_false_branch(true) }
+        try begin_asm_if(eq)
         return
     }
     if bytes_is(dir, c".else") || bytes_is(dir, c".elseif") {
         if ac.if_stack.n == 0 { try as_err(c".else/.elseif without matching .if") }
         vec_pop(&ac.if_stack)
-        skip_to_eol()
-        if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 10 { ac.pos += 1; ac.line += 1 }
+        advance_statement()
         try skip_false_branch(false)
         return
     }
@@ -654,11 +701,12 @@ fn parse_directive(dir Bytes) void fails {
             if nul { emit_u8(0) }
             skip_hspace()
             if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 44 { ac.pos += 1; continue }
+            if !nul && ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 34 { continue }
             break
         }
         return
     }
-    if bytes_is(dir, c".zero") || bytes_is(dir, c".skip") || bytes_is(dir, c".space") {
+    if bytes_is(dir, c".zero") || bytes_is(dir, c".skip") || bytes_is(dir, c".space") || bytes_is(dir, c".org") {
         cnt u32 = try parse_expr()
         fill u64 = 0
         skip_hspace()
@@ -666,7 +714,14 @@ fn parse_directive(dir Bytes) void fails {
             ac.pos += 1
             fill = bitcast[u64](try eval_const_now(try parse_expr())) & 0xff
         }
-        emit_fill(cnt, 1, fill)
+        if bytes_is(dir, c".org") {
+            s handle[Section] = cur_sec()
+            f handle[Frag] = vec_add(&s.frags)
+            f.kind = FK_ORG
+            f.expr = cnt
+            f.fill = fill
+            f.line = ac.line
+        } else { emit_fill(cnt, 1, fill) }
         return
     }
     if bytes_is(dir, c".fill") {
@@ -728,7 +783,15 @@ fn parse_directive(dir Bytes) void fails {
     if bytes_is(dir, c".att_syntax") { skip_to_eol(); return }
     if bytes_is(dir, c".intel_syntax") { try as_err(c".intel_syntax is not supported"); return }
     if bytes_is(dir, c".err") || bytes_is(dir, c".error") { try as_err(c".error directive encountered"); return }
-    if bytes_is(dir, c".warning") { skip_to_eol(); return }
+    if bytes_is(dir, c".warning") {
+        if ac.fatal_warnings {
+            warning Buf = {}
+            try parse_string_lit(&warning)
+            try as_err_b(c"", buf_bytes(&warning))
+        }
+        skip_to_eol()
+        return
+    }
     // Accepted and ignored for now (no DWARF line emission yet)
     if bytes_is(dir, c".file") || bytes_is(dir, c".loc") ||
        bytes_is(dir, c".addrsig") || bytes_is(dir, c".addrsig_sym") ||
@@ -754,7 +817,7 @@ fn as_parse_all() void fails {
         if c == 10 { ac.pos += 1; ac.line += 1; continue }
         if c == 59 { ac.pos += 1; continue }
         if c == 35 || (c == 47 && ac.pos + 1 < n && p[u8, ac.pos + 1] == 47) {
-            skip_to_eol()
+            advance_statement()
             continue
         }
 
@@ -763,9 +826,11 @@ fn as_parse_all() void fails {
             start u64 = ac.pos
             j u64 = start
             while j < n && is_digit(p[u8, j]) { j += 1 }
+            end u64 = j
+            while j < n && is_hspace(p[u8, j]) { j += 1 }
             if j < n && p[u8, j] == 58 {
                 num u64 = 0
-                for k u64 in start..j { num = num * 10 + zext[u64](p[u8, k] - 48) }
+                for k u64 in start..end { num = num * 10 + zext[u64](p[u8, k] - 48) }
                 ac.pos = j + 1
                 sid u32 = local_label_define(trunc[u32](num))
                 try as_define_label(sid)

@@ -67,6 +67,7 @@ fn sec_previous() void {
 fn as_init_sections() void {
     // Default .text section (index 0)
     t u32 = sec_get_or_create(bytes_c(c".text"), SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR, 0, bytes_empty(), false)
+    sec_at(t).sh_align = 4
     ac.cur_sec = t
     ac.prev_sec = t
 }
@@ -148,6 +149,7 @@ fn emit_relax_jmp(short_op u8, long_op u8, is_jcc bool, expr u32) void {
     s handle[Section] = cur_sec()
     f handle[Frag] = vec_add(&s.frags)
     f.kind = FK_RELAX_JMP
+    f.branch_pc32 = ac.code32
     f.is_long = 0
     f.data_off = zext[u32](short_op) | (zext[u32](long_op) << 8) | (if is_jcc { 0x10000 } else { 0 })
     f.expr = expr
@@ -161,9 +163,12 @@ fn emit_align(align u32, fill u8, has_fill bool, max_skip u32) void {
     f handle[Frag] = vec_add(&s.frags)
     f.kind = FK_ALIGN
     f.data_len = align
-    f.has_fill = if has_fill { 1 } else { 0 }
-    f.is_code = if (s.sh_flags & SHF_EXECINSTR) != 0 { 1 } else { 0 }
-    f.fill = zext[u64](fill) | (zext[u64](max_skip) << 32)
+    is_code bool = (s.sh_flags & SHF_EXECINSTR) != 0
+    code32_nops bool = ac.code32 && is_code && !has_fill
+    f.has_fill = if has_fill || code32_nops { 1 } else { 0 }
+    f.is_code = if is_code { 1 } else { 0 }
+    fill_byte u8 = if code32_nops { 0x90 } else { fill }
+    f.fill = zext[u64](fill_byte) | (zext[u64](max_skip) << 32)
     f.expr = AS_NONE
     f.line = ac.line
 }
@@ -234,9 +239,11 @@ fn emit_nop_chunk(out handle[Buf], n u64) void {
 }
 
 fn emit_nops(out handle[Buf], count u64) void {
+    // Clang selects the generic x86-64 CPU, whose longest NOP is ten bytes.
+    limit u64 = if ac.generic_x86_64 { 10 } else { 15 }
     rem u64 = count
     while rem > 0 {
-        chunk u64 = if rem > 15 { 15 } else { rem }
+        chunk u64 = if rem > limit { limit } else { rem }
         emit_nop_chunk(out, chunk)
         rem -= chunk
     }
@@ -286,10 +293,29 @@ fn emit_sleb_bytes(out handle[Buf], v i64) void {
 
 // ---------- Relaxation & layout ----------
 
-fn layout_section_frags(s handle[Section]) void {
+// .org measures an offset from the section start. Its size can shrink when
+// relaxation widens a preceding branch, so recalculate it on every pass.
+fn org_offset(sec_id u32, frag_id u64, expr u32) i64 {
+    ev EvalVal = {}
+    eval_expr(expr, true, &ev)
+    if ev.kind == EV_CONST { return ev.val }
+    if ev.kind == EV_SYM && ev.variant == VAR_NONE && eval_sym_sec(ev.sym_a) == sec_id {
+        if (ev.sym_a & 0x80000000) == 0 {
+            sym handle[Symbol] = sym_at(ev.sym_a)
+            if zext[u64](sym.frag_id) >= frag_id { return -1 }
+        }
+        return eval_sym_addr(ev.sym_a) + ev.val
+    }
+    return -1
+}
+
+fn layout_section_frags(sec_id u32) bool {
+    s handle[Section] = sec_at(sec_id)
     off u64 = 0
+    changed bool = false
     for fi u64 in 0..s.frags.n {
         f handle[Frag] = vec_at(&s.frags, fi)
+        prev_size u64 = f.size
         f.addr = off
         if f.kind == FK_DATA {
             f.size = zext[u64](f.data_len)
@@ -320,10 +346,15 @@ fn layout_section_frags(s handle[Section]) void {
             ev EvalVal = {}
             eval_expr(f.expr, true, &ev)
             f.size = if ev.kind == EV_CONST { sleb_size(ev.val) } else { 1 }
+        } else if f.kind == FK_ORG {
+            target i64 = org_offset(sec_id, fi, f.expr)
+            f.size = if target >= 0 && bitcast[u64](target) >= off { bitcast[u64](target) - off } else { 0 }
         }
+        if f.size != prev_size { changed = true }
         off += f.size
     }
     s.size = off
+    return changed
 }
 
 fn update_symbol_values() void {
@@ -356,12 +387,13 @@ fn rela_less(a handle[Rela], b handle[Rela]) bool {
     return a.offset < b.offset
 }
 
-fn add_rela(s handle[Section], off u64, sym_id u32, rtype u32, addend i64) void {
+fn add_rela(s handle[Section], off u64, sym_id u32, rtype u32, addend i64, keep_symbol bool) void {
     r handle[Rela] = vec_add(&s.relas)
     r.offset = off
     r.sym_id = sym_id
     r.rtype = rtype
     r.addend = addend
+    r.keep_symbol = keep_symbol
 }
 
 fn resolve_variant_reloc(variant u8, size u8, kind u8) u32 {
@@ -399,12 +431,22 @@ fn resolve_variant_reloc(variant u8, size u8, kind u8) u32 {
 fn as_layout_and_relax() void fails {
     try check_undefined_local_labels()
 
-    // Iterative relaxation loop (monotone widening, converges quickly)
+    // Before widening branches, stabilize directives whose size depends on
+    // addresses in another section or a later fragment in the same section.
+    converged bool = false
     for iter u32 in 0..64 {
-        for si u64 in 0..ac.sections.n {
-            layout_section_frags(sec_at(trunc[u32](si)))
+        layout_stable bool = false
+        for layout_iter u32 in 0..64 {
+            layout_changed bool = false
+            for si u64 in 0..ac.sections.n {
+                if layout_section_frags(trunc[u32](si)) { layout_changed = true }
+            }
+            if !layout_changed {
+                layout_stable = true
+                break
+            }
         }
-        update_symbol_values()
+        if !layout_stable { try as_err(c"fragment sizes did not converge") }
 
         changed bool = false
         for si u64 in 0..ac.sections.n {
@@ -432,13 +474,26 @@ fn as_layout_and_relax() void fails {
                 }
             }
         }
-        if !changed { break }
+        if !changed {
+            converged = true
+            break
+        }
     }
+    if !converged { try as_err(c"branch relaxation did not converge") }
+    update_symbol_values()
 
     // Finalize section bytes and apply fixups
     for si u64 in 0..ac.sections.n {
         s handle[Section] = sec_at(trunc[u32](si))
         is_nobits bool = s.sh_type == SHT_NOBITS
+        for fi u64 in 0..s.frags.n {
+            f handle[Frag] = vec_at(&s.frags, fi)
+            if f.kind == FK_ORG {
+                target i64 = org_offset(trunc[u32](si), fi, f.expr)
+                if target < 0 || bitcast[u64](target) < f.addr { try as_err_line(f.line, c"invalid .org offset") }
+                if is_nobits && f.size != 0 && f.fill != 0 { try as_err_line(f.line, c"non-zero .org fill in a NOBITS section") }
+            }
+        }
         if !is_nobits {
             buf_clear(&s.out)
             for fi u64 in 0..s.frags.n {
@@ -474,8 +529,9 @@ fn as_layout_and_relax() void fails {
                             disp i64 = taddr - bitcast[i64](rel_off + 4)
                             patch_le(&s.out, rel_off, 4, bitcast[u64](disp))
                         } else if ev.kind == EV_SYM && (ev.sym_a & 0x80000000) == 0 {
-                            rtype u32 = if ev.variant == VAR_PLT || ev.variant == VAR_NONE { R_X86_64_PLT32 } else { resolve_variant_reloc(ev.variant, 4, FIX_PC) }
-                            add_rela(s, rel_off, ev.sym_a, rtype, ev.val - 4)
+                            kind u8 = if f.branch_pc32 { FIX_PC } else { FIX_PLT }
+                            rtype u32 = resolve_variant_reloc(ev.variant, 4, kind)
+                            add_rela(s, rel_off, ev.sym_a, rtype, ev.val - 4, ev.variant != VAR_NONE)
                         } else {
                             try as_err_line(f.line, c"unresolved branch target")
                         }
@@ -492,7 +548,8 @@ fn as_layout_and_relax() void fails {
                 } else if f.kind == FK_FILL {
                     ev EvalVal = {}
                     eval_expr(f.expr, true, &ev)
-                    cnt u64 = if ev.kind == EV_CONST && ev.val > 0 { bitcast[u64](ev.val) } else { 0 }
+                    if ev.kind != EV_CONST { try as_err_line(f.line, c"non-constant fill count") }
+                    cnt u64 = if ev.val > 0 { bitcast[u64](ev.val) } else { 0 }
                     esz u32 = f.data_len
                     for k u64 in 0..cnt {
                         for b u32 in 0..esz {
@@ -509,6 +566,10 @@ fn as_layout_and_relax() void fails {
                     eval_expr(f.expr, true, &ev)
                     if ev.kind != EV_CONST { try as_err_line(f.line, c"non-constant .sleb128 expression") }
                     emit_sleb_bytes(&s.out, ev.val)
+                } else if f.kind == FK_ORG {
+                    buf_reserve(&s.out, f.size)
+                    mem_set(s.out.p + s.out.n, trunc[u8](f.fill), f.size)
+                    s.out.n += f.size
                 }
             }
         }
@@ -540,26 +601,23 @@ fn as_layout_and_relax() void fails {
                     taddr i64 = eval_sym_addr(ev.sym_a) + ev.val
                     disp i64 = taddr - bitcast[i64](off + zext[u64](fx.next_off))
                     patch_le(&s.out, off, fx.size, bitcast[u64](disp))
-                } else if (ev.sym_a & 0x80000000) == 0 {
+                } else {
+                    if ac.template_mode && (ev.sym_a & 0x80000000) != 0 {
+                        try as_err_line(fx.line, c"cannot emit relocation against section-local dot in a template")
+                    }
                     rtype u32 = resolve_variant_reloc(ev.variant, fx.size, fx.kind)
                     addend i64 = ev.val
-                    if is_pc || rtype == R_X86_64_PC32 || rtype == R_X86_64_PC64 || rtype == R_X86_64_PLT32 ||
-                       rtype == R_X86_64_GOTPCREL || rtype == R_X86_64_GOTPCRELX || rtype == R_X86_64_REX_GOTPCRELX ||
-                       rtype == R_X86_64_GOTTPOFF || rtype == R_X86_64_TLSGD || rtype == R_X86_64_TLSLD {
-                        addend -= zext[i64](fx.next_off)
-                    }
-                    add_rela(s, off, ev.sym_a, rtype, addend)
-                } else {
-                    try as_err_line(fx.line, c"cannot emit relocation against section-local dot")
+                    if is_pc { addend -= zext[i64](fx.next_off) }
+                    add_rela(s, off, ev.sym_a, rtype, addend, ev.variant != VAR_NONE)
                 }
             } else if ev.kind == EV_DIFF {
                 // sym_a - sym_b (or sym_a - dot) where sym_b is defined in this section -> PC-relative relocation!
                 sb_sec u32 = eval_sym_sec(ev.sym_b)
                 if sb_sec == trunc[u32](si) && (ev.sym_a & 0x80000000) == 0 {
-                    rtype u32 = if fx.size == 8 { R_X86_64_PC64 } else { R_X86_64_PC32 }
+                    rtype u32 = resolve_variant_reloc(VAR_NONE, fx.size, FIX_PC)
                     sb_addr i64 = eval_sym_addr(ev.sym_b)
                     addend i64 = ev.val - sb_addr + bitcast[i64](off)
-                    add_rela(s, off, ev.sym_a, rtype, addend)
+                    add_rela(s, off, ev.sym_a, rtype, addend, false)
                 } else {
                     try as_err_line(fx.line, c"cannot evaluate cross-section symbol difference")
                 }
@@ -582,6 +640,9 @@ fn as_layout_and_relax() void fails {
                 sym.defined = true
                 sym.sec_id = AS_NONE
                 sym.value = bitcast[u64](ev.val)
+            } else if ev.kind == EV_REGISTER {
+                // A register alias has no ELF symbol.
+                sym.defined = false
             } else if ev.kind == EV_SYM && (ev.sym_a & 0x80000000) == 0 {
                 target handle[Symbol] = sym_at(ev.sym_a)
                 sym.defined = target.defined

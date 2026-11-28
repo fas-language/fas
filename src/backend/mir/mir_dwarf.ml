@@ -14,6 +14,7 @@
    .debug_loclists  location lists of variables in registers (only when
                   some variable has one).
    .debug_rnglists  ranges of lexical blocks in several pieces (likewise).
+   .debug_str and .debug_line_str  interned DIE strings and line-table paths.
    .debug_line    one line program; each function is its own sequence, from
                   DW_LNE_set_address at its first byte to DW_LNE_end_sequence
                   after its last.
@@ -25,12 +26,11 @@
    its first marker; that marker's own row carries prologue_end, so a
    breakpoint on the function stops after the frame is built.
 
-   Addresses are R_X86_64_64 relocations against [text_symbol] (the start of
-   .text) plus the offset, the two section offsets in the compile unit
-   header and DW_AT_stmt_list are R_X86_64_32 relocations against local
-   symbols at the start of .debug_abbrev and .debug_line, so the linker can
-   concatenate the sections of several objects. Strings are inline
-   (DW_FORM_string): no .debug_str. *)
+   Addresses are R_X86_64_64 relocations against a local symbol at the
+   start of the function's code section plus the offset. Section offsets
+   use R_X86_64_32 relocations against local symbols at the start of the
+   referenced sections so the linker can concatenate debug sections from
+   several objects. *)
 
 module A = X64
 
@@ -38,9 +38,11 @@ type func_lines = {
   name : string;  (** the symbol *)
   display : string option;  (** the source-level name, when it differs *)
   external_ : bool;
-  start : int;  (** offset in .text *)
+  decl_loc : int;
+  code_base : string;
+  start : int;  (** offset in the code section *)
   size : int;
-  rows : (int * int) list;  (** (offset in .text, location id), in code order *)
+  rows : (int * int) list;  (** (code section offset, location id), in code order *)
   vars : Fir.dvar list;  (** the function's source variables *)
   vlocs : (int * vloc) list;  (** index in [vars] -> where it lives; absent: optimized out *)
 }
@@ -54,6 +56,8 @@ type section = { sname : string; ssym : string option; bytes : Bytes.t; relocs :
 
 let abbrev_symbol = ".Lfas.debug_abbrev"
 let line_symbol = ".Lfas.debug_line"
+let str_symbol = ".Lfas.debug_str"
+let line_str_symbol = ".Lfas.debug_line_str"
 let loclists_symbol = ".Lfas.debug_loclists"
 let rnglists_symbol = ".Lfas.debug_rnglists"
 
@@ -77,6 +81,19 @@ let rec sleb b x =
   else begin
     u8 b (byte lor 0x80);
     sleb b rest
+  end
+
+let rec leb64 ~signed b x =
+  let byte = Int64.to_int (Int64.logand x 0x7fL) in
+  let rest = if signed then Int64.shift_right x 7 else Int64.shift_right_logical x 7 in
+  let done_ =
+    if signed then (rest = 0L && byte land 0x40 = 0) || (rest = -1L && byte land 0x40 <> 0)
+    else rest = 0L
+  in
+  if done_ then u8 b byte
+  else begin
+    u8 b (byte lor 0x80);
+    leb64 ~signed b rest
   end
 
 let cstr b s =
@@ -111,8 +128,10 @@ let dw_tag_lexical_block = 0x0b
 let dw_tag_member = 0x0d
 let dw_tag_pointer_type = 0x0f
 let dw_tag_structure_type = 0x13
+let dw_tag_subroutine_type = 0x15
 let dw_tag_typedef = 0x16
 let dw_tag_union_type = 0x17
+let dw_tag_unspecified_parameters = 0x18
 let dw_tag_subrange_type = 0x21
 let dw_tag_base_type = 0x24
 let dw_tag_enumerator = 0x28
@@ -122,6 +141,8 @@ let dw_at_byte_size = 0x0b
 let dw_at_const_value = 0x1c
 let dw_at_count = 0x37
 let dw_at_data_member_location = 0x38
+let dw_at_bit_size = 0x0d
+let dw_at_data_bit_offset = 0x6b
 let dw_at_declaration = 0x3c
 let dw_at_encoding = 0x3e
 let dw_at_type = 0x49
@@ -148,7 +169,8 @@ let dw_at_linkage_name = 0x6e
 let dw_form_addr = 0x01
 let dw_form_data2 = 0x05
 let dw_form_data8 = 0x07
-let dw_form_string = 0x08
+let dw_form_strp = 0x0e
+let dw_form_line_strp = 0x1f
 let dw_form_flag = 0x0c
 let dw_form_udata = 0x0f
 let dw_form_sec_offset = 0x17
@@ -160,9 +182,9 @@ let dw_lnct_directory_index = 2
 (* [loc id] gives (file, line, column) of a Fir location id (never 0).
    Returns no sections when no function has a row: nothing to describe. *)
 let build ~cwd ~producer ~text_symbol ~text_size ~(loc : int -> string * int * int)
-    ~(dtypes : Fir.dtype array) ~(scopes : int array) ~(loc_scope : int -> int) (funcs : func_lines list) =
+    ~(dtypes : Fir.dtype array) ~(scopes : int array) ~(loc_scope : int -> int) ~(globals : Fir.dvar list) (funcs : func_lines list) =
   let funcs = List.filter (fun f -> f.rows <> [] && f.size > 0) funcs in
-  if funcs = [] then []
+  if funcs = [] && globals = [] then []
   else begin
     (* the primary source file is the one of the lowest location id used
        (front ends number the main file's locations first; a header's
@@ -172,7 +194,8 @@ let build ~cwd ~producer ~text_symbol ~text_size ~(loc : int -> string * int * i
        directory 0. It is file 0; the others follow in order of first use. *)
     let primary_path =
       let lowest = List.fold_left (fun acc f -> List.fold_left (fun acc (_, l) -> min acc l) acc f.rows) max_int funcs in
-      let file, _, _ = loc lowest in
+      let lowest = List.fold_left (fun n (d : Fir.dvar) -> if d.vloc > 0 then min n d.vloc else n) lowest globals in
+      let file, _, _ = if lowest = max_int then ("", 0, 0) else loc lowest in
       file
     in
     let comp_dir = absolute_directory ~cwd primary_path in
@@ -213,16 +236,32 @@ let build ~cwd ~producer ~text_symbol ~text_size ~(loc : int -> string * int * i
     in
     (* .debug_info *)
     let info = Buffer.create 256 and info_relocs = ref [] in
-    let addr b relocs offset =
-      relocs := A.Abs64 { offset = Buffer.length b; symbol = text_symbol; addend = offset } :: !relocs;
+    let strings = Buffer.create 128 and line_strings = Buffer.create 64 in
+    let string_offset table contents symbol b relocs s =
+      let addend =
+        match Hashtbl.find_opt table s with
+        | Some offset -> offset
+        | None ->
+            let offset = Buffer.length contents in
+            cstr contents s;
+            Hashtbl.add table s offset;
+            offset
+      in
+      relocs := A.Abs32 { offset = Buffer.length b; symbol; addend } :: !relocs;
+      u32 b 0
+    in
+    let str_offset = string_offset (Hashtbl.create 32) strings str_symbol info info_relocs in
+    let addr b relocs symbol offset =
+      relocs := A.Abs64 { offset = Buffer.length b; symbol; addend = offset } :: !relocs;
       u64 b 0
     in
     (* a DIE: its abbreviation, then each attribute's value *)
     let die tag children (attrs : (int * int * (unit -> unit)) list) =
-      uleb info (abbrev tag children (List.map (fun (a, f, _) -> (a, f)) attrs));
+      (* The pseudo attribute (0, 0) writes a location or range list. *)
+      uleb info (abbrev tag children (List.filter_map (fun (a, f, _) -> if a = 0 then None else Some (a, f)) attrs));
       List.iter (fun (_, _, w) -> w ()) attrs
     in
-    let str a s = (a, dw_form_string, fun () -> cstr info s) in
+    let str a s = (a, dw_form_strp, fun () -> str_offset s) in
     let udata a n = (a, dw_form_udata, fun () -> uleb info n) in
     let flag_present a = (a, dw_form_flag_present, fun () -> ()) in
     (* type references are offsets in the unit, patched once every type is out *)
@@ -253,6 +292,26 @@ let build ~cwd ~producer ~text_symbol ~text_size ~(loc : int -> string * int * i
           info_relocs := A.Abs32 { offset = Buffer.length info; symbol = sym; addend = Buffer.length b } :: !info_relocs;
           u32 info 0 )
     in
+    let code_range symbol start size =
+      [ (dw_at_low_pc, dw_form_addr, fun () -> addr info info_relocs symbol start);
+        (dw_at_high_pc, dw_form_data8, fun () -> u64 info size) ]
+    in
+    let code_ranges rs =
+      [ sec_offset dw_at_ranges rnglists_symbol rnglists used_rnglists;
+        (0, 0, fun () ->
+          List.iter
+            (fun (symbol, start, size) ->
+              u8 rnglists 0x07 (* DW_RLE_start_length *);
+              addr rnglists rng_relocs symbol start;
+              uleb rnglists size)
+            rs;
+          u8 rnglists 0 (* DW_RLE_end_of_list *)) ]
+    in
+    let cu_range =
+      if List.exists (fun f -> f.code_base <> text_symbol) funcs then
+        code_ranges (List.map (fun f -> (f.code_base, f.start, f.size)) funcs)
+      else code_range text_symbol 0 text_size
+    in
     u32 info 0 (* unit_length, patched *);
     u16 info 5;
     u8 info 1 (* DW_UT_compile *);
@@ -260,16 +319,14 @@ let build ~cwd ~producer ~text_symbol ~text_size ~(loc : int -> string * int * i
     info_relocs := A.Abs32 { offset = Buffer.length info; symbol = abbrev_symbol; addend = 0 } :: !info_relocs;
     u32 info 0;
     die dw_tag_compile_unit true
-      [ str dw_at_producer producer;
+      ([ str dw_at_producer producer;
         (dw_at_language, dw_form_data2, fun () -> u16 info dw_lang_c11);
         str dw_at_name (Filename.basename primary_path);
         str dw_at_comp_dir comp_dir;
         ( dw_at_stmt_list, dw_form_sec_offset,
           fun () ->
             info_relocs := A.Abs32 { offset = Buffer.length info; symbol = line_symbol; addend = 0 } :: !info_relocs;
-            u32 info 0 );
-        (dw_at_low_pc, dw_form_addr, fun () -> addr info info_relocs 0);
-        (dw_at_high_pc, dw_form_data8, fun () -> u64 info text_size) ];
+            u32 info 0 ) ] @ cu_range);
     (* the types (Fir dtype i is DIE type_off.(i)); a byte size where DWARF
        wants one, from the layout (typedef and enum chains are bounded) *)
     let rec size_of depth t =
@@ -279,9 +336,9 @@ let build ~cwd ~producer ~text_symbol ~text_size ~(loc : int -> string * int * i
         | Fir.Dbase { size; _ } -> size
         | Dpointer _ -> 8
         | Dstruct { size; _ } -> Option.value size ~default:0
-        | Darray (e, n) | Dvector (e, n) -> n * size_of (depth + 1) e
+        | Darray (e, n) | Dvector (e, n) -> max 0 n * size_of (depth + 1) e
         | Dtypedef (_, t) | Denum { base = t; _ } -> size_of (depth + 1) t
-        | Dvoid -> 0
+        | Dvoid | Dsubroutine _ -> 0
     in
     Array.iteri
       (fun i t ->
@@ -306,32 +363,52 @@ let build ~cwd ~producer ~text_symbol ~text_size ~(loc : int -> string * int * i
                 [ str dw_at_name name; udata dw_at_byte_size n ];
               if members <> [] then begin
                 List.iter
-                  (fun (m, t, o) ->
-                    die dw_tag_member false ([ str dw_at_name m ] @ typed t @ [ udata dw_at_data_member_location o ]))
+                  (fun (m : Fir.dmember) ->
+                    let name = if m.member_name = "" then [] else [ str dw_at_name m.member_name ] in
+                    let offset =
+                      match m.member_bits with
+                      | None -> [ udata dw_at_data_member_location m.member_offset ]
+                      | Some bits -> [ udata dw_at_bit_size bits; udata dw_at_data_bit_offset m.member_offset ]
+                    in
+                    die dw_tag_member false (name @ typed m.member_type @ offset))
                   members;
                 u8 info 0
               end
           | Darray (e, n) | Dvector (e, n) ->
               let vector = match t with Dvector _ -> [ flag_present dw_at_gnu_vector ] | _ -> [] in
               die dw_tag_array_type true (typed e @ vector);
-              die dw_tag_subrange_type false [ udata dw_at_count n ];
+              die dw_tag_subrange_type false (if n >= 0 then [ udata dw_at_count n ] else []);
               u8 info 0
           | Dtypedef (name, t) -> die dw_tag_typedef false (str dw_at_name name :: typed t)
+          | Dsubroutine (result, params, variadic) ->
+              let children = params <> [] || variadic in
+              die dw_tag_subroutine_type children (typed result);
+              if children then begin
+                List.iter (fun t -> die dw_tag_formal_parameter false (typed t)) params;
+                if variadic then die dw_tag_unspecified_parameters false [];
+                u8 info 0
+              end
           | Denum { name; base; enumerators } ->
               die dw_tag_enumeration_type (enumerators <> [])
                 ([ str dw_at_name name ] @ typed base @ [ udata dw_at_byte_size (size_of 0 base) ]);
               if enumerators <> [] then begin
+                let signed =
+                  match dtypes.(base) with
+                  | Dbase { enc = (Dunsigned | Dunsigned_char | Dboolean); _ } -> false
+                  | _ -> true
+                in
+                let form = if signed then dw_form_sdata else dw_form_udata in
                 List.iter
                   (fun (e, v) ->
                     die dw_tag_enumerator false
-                      [ str dw_at_name e; (dw_at_const_value, dw_form_sdata, fun () -> sleb info (Int64.to_int v)) ])
+                      [ str dw_at_name e; (dw_at_const_value, form, fun () -> leb64 ~signed info v) ])
                   enumerators;
                 u8 info 0
               end
         end)
       dtypes;
     (* one variable *)
-    let variable f i (d : Fir.dvar) =
+    let variable code_base vloc (d : Fir.dvar) =
       let decl =
         if d.vloc = 0 then []
         else
@@ -339,18 +416,31 @@ let build ~cwd ~producer ~text_symbol ~text_size ~(loc : int -> string * int * i
           if file = "" then [] else [ udata dw_at_decl_file (file_index file); udata dw_at_decl_line line ]
       in
       let location =
-        match List.assoc_opt i f.vlocs with
-        | None -> []
-        | Some (Expr e) -> [ (dw_at_location, dw_form_exprloc, fun () -> uleb info (String.length e); Buffer.add_string info e) ]
-        | Some (Ranges rs) ->
+        match d.vsymbol, vloc with
+        | Some (symbol, tls), _ ->
+            [ (dw_at_location, dw_form_exprloc, fun () ->
+                if tls then begin
+                  uleb info 6;
+                  u8 info 0x0c (* DW_OP_const4u *);
+                  info_relocs := A.Dtpoff32 { offset = Buffer.length info; symbol; addend = 0 } :: !info_relocs;
+                  u32 info 0;
+                  u8 info 0x9b (* DW_OP_form_tls_address *)
+                end else begin
+                  uleb info 9;
+                  u8 info 0x03 (* DW_OP_addr *);
+                  info_relocs := A.Abs64 { offset = Buffer.length info; symbol; addend = 0 } :: !info_relocs;
+                  u64 info 0
+                end) ]
+        | None, None -> []
+        | None, Some (Expr e) -> [ (dw_at_location, dw_form_exprloc, fun () -> uleb info (String.length e); Buffer.add_string info e) ]
+        | None, Some (Ranges rs) ->
             [ sec_offset dw_at_location loclists_symbol loclists used_loclists;
               (* written when the attribute is, so the offset above is the entries' *)
               (0, 0, fun () ->
                 List.iter
                   (fun (s, e, x) ->
                     u8 loclists 0x08 (* DW_LLE_start_length *);
-                    loc_relocs := A.Abs64 { offset = Buffer.length loclists; symbol = text_symbol; addend = s } :: !loc_relocs;
-                    u64 loclists 0;
+                    addr loclists loc_relocs code_base s;
                     uleb loclists (e - s);
                     uleb loclists (String.length x);
                     Buffer.add_string loclists x)
@@ -359,13 +449,12 @@ let build ~cwd ~producer ~text_symbol ~text_size ~(loc : int -> string * int * i
       in
       let attrs = [ str dw_at_name d.vname ] @ typed d.vty @ decl @ location in
       let tag = if d.varg > 0 then dw_tag_formal_parameter else dw_tag_variable in
-      (* the pseudo attribute (0, 0) only writes the list *)
-      uleb info (abbrev tag false (List.filter_map (fun (a, f, _) -> if a = 0 then None else Some (a, f)) attrs));
-      List.iter (fun (_, _, w) -> w ()) attrs
+      die tag false attrs
     in
+    List.iter (variable text_symbol None) globals;
     List.iter
       (fun f ->
-        let file, line, _ = loc (snd (List.hd f.rows)) in
+        let file, line, _ = loc (if f.decl_loc > 0 then f.decl_loc else snd (List.hd f.rows)) in
         let display = Option.value f.display ~default:f.name in
         (* lexical blocks: each row's code, up to the next row, belongs to
            its location's scope and every scope around it *)
@@ -398,15 +487,14 @@ let build ~cwd ~producer ~text_symbol ~text_size ~(loc : int -> string * int * i
         let children sc = List.sort compare (Hashtbl.fold (fun c _ acc -> if scopes.(c) = sc then c :: acc else acc) ranges []) in
         let has_children = f.vars <> [] || Hashtbl.length ranges > 0 in
         die dw_tag_subprogram has_children
-          ([ (dw_at_low_pc, dw_form_addr, fun () -> addr info info_relocs f.start);
-             (dw_at_high_pc, dw_form_data8, fun () -> u64 info f.size);
-             (dw_at_frame_base, dw_form_exprloc, fun () -> uleb info 1; u8 info 0x56 (* DW_OP_reg6: rbp *));
+          (code_range f.code_base f.start f.size
+          @ [ (dw_at_frame_base, dw_form_exprloc, fun () -> uleb info 1; u8 info 0x56 (* DW_OP_reg6: rbp *));
              str dw_at_name display ]
           @ (if display <> f.name then [ str dw_at_linkage_name f.name ] else [])
-          @ [ udata dw_at_decl_file (Hashtbl.find files file); udata dw_at_decl_line line;
+          @ [ udata dw_at_decl_file (file_index file); udata dw_at_decl_line line;
               (dw_at_external, dw_form_flag, fun () -> u8 info (if f.external_ then 1 else 0)) ]);
         if has_children then begin
-          List.iter (fun (i, d) -> variable f i d) (params @ locals);
+          List.iter (fun (i, d) -> variable f.code_base (List.assoc_opt i f.vlocs) d) (params @ locals);
           let rec block sc =
             let rs =
               List.sort_uniq compare (Hashtbl.find ranges sc)
@@ -415,26 +503,17 @@ let build ~cwd ~producer ~text_symbol ~text_size ~(loc : int -> string * int * i
             in
             let where =
               match rs with
-              | [ (s, e) ] ->
-                  [ (dw_at_low_pc, dw_form_addr, fun () -> addr info info_relocs s);
-                    (dw_at_high_pc, dw_form_data8, fun () -> u64 info (e - s)) ]
-              | _ ->
-                  [ sec_offset dw_at_ranges rnglists_symbol rnglists used_rnglists;
-                    (0, 0, fun () ->
-                      List.iter
-                        (fun (s, e) ->
-                          u8 rnglists 0x07 (* DW_RLE_start_length *);
-                          rng_relocs := A.Abs64 { offset = Buffer.length rnglists; symbol = text_symbol; addend = s } :: !rng_relocs;
-                          u64 rnglists 0;
-                          uleb rnglists (e - s))
-                        rs;
-                      u8 rnglists 0 (* DW_RLE_end_of_list *)) ]
+              | [ (s, e) ] -> code_range f.code_base s (e - s)
+              | _ -> code_ranges (List.map (fun (s, e) -> (f.code_base, s, e - s)) rs)
             in
-            uleb info (abbrev dw_tag_lexical_block true (List.filter_map (fun (a, f, _) -> if a = 0 then None else Some (a, f)) where));
-            List.iter (fun (_, _, w) -> w ()) where;
-            List.iter (fun (i, d) -> variable f i d) (in_scope sc);
-            List.iter block (children sc);
-            u8 info 0
+            let locals = in_scope sc and nested = children sc in
+            let has_children = locals <> [] || nested <> [] in
+            die dw_tag_lexical_block has_children where;
+            if has_children then begin
+              List.iter (fun (i, d) -> variable f.code_base (List.assoc_opt i f.vlocs) d) locals;
+              List.iter block nested;
+              u8 info 0
+            end
           in
           List.iter block (children 0);
           u8 info 0
@@ -458,6 +537,7 @@ let build ~cwd ~producer ~text_symbol ~text_size ~(loc : int -> string * int * i
     let list_bytes b = let by = Buffer.to_bytes b in Bytes.set_int32_le by 0 (Int32.of_int (Bytes.length by - 4)); by in
     (* .debug_line *)
     let ln = Buffer.create 256 and line_relocs = ref [] in
+    let path_offset = string_offset (Hashtbl.create 8) line_strings line_str_symbol ln line_relocs in
     u32 ln 0 (* unit_length, patched *);
     u16 ln 5;
     u8 ln 8 (* address_size *);
@@ -474,16 +554,16 @@ let build ~cwd ~producer ~text_symbol ~text_size ~(loc : int -> string * int * i
     List.iter (u8 ln) [ 0; 1; 1; 1; 1; 0; 0; 0; 1; 0; 0; 1 ];
     u8 ln 1 (* directory entry format: path as a string *);
     uleb ln dw_lnct_path;
-    uleb ln dw_form_string;
+    uleb ln dw_form_line_strp;
     uleb ln (List.length !dir_order);
-    List.iter (cstr ln) (List.rev !dir_order);
+    List.iter path_offset (List.rev !dir_order);
     u8 ln 2 (* file entry format: path, directory index *);
     uleb ln dw_lnct_path;
-    uleb ln dw_form_string;
+    uleb ln dw_form_line_strp;
     uleb ln dw_lnct_directory_index;
     uleb ln dw_form_udata;
     uleb ln (List.length !file_order);
-    List.iter (fun (name, d) -> cstr ln name; uleb ln d) (List.rev !file_order);
+    List.iter (fun (name, d) -> path_offset name; uleb ln d) (List.rev !file_order);
     let header_length = Buffer.length ln - header_start in
     List.iter
       (fun f ->
@@ -492,8 +572,7 @@ let build ~cwd ~producer ~text_symbol ~text_size ~(loc : int -> string * int * i
         u8 ln 0;
         uleb ln 9;
         u8 ln 2 (* DW_LNE_set_address *);
-        line_relocs := A.Abs64 { offset = Buffer.length ln; symbol = text_symbol; addend = f.start } :: !line_relocs;
-        u64 ln 0;
+        addr ln line_relocs f.code_base f.start;
         let cur_file = ref (-1) and cur_line = ref 1 and cur_col = ref 0 and cur_pc = ref f.start in
         let row ?(prologue_end = false) pc l =
           let file, line, col = loc l in
@@ -535,7 +614,9 @@ let build ~cwd ~producer ~text_symbol ~text_size ~(loc : int -> string * int * i
     Bytes.set_int32_le line header_length_at (Int32.of_int header_length);
     [ { sname = ".debug_abbrev"; ssym = Some abbrev_symbol; bytes = Buffer.to_bytes ab; relocs = [] };
       { sname = ".debug_info"; ssym = None; bytes = info; relocs = List.rev !info_relocs };
-      { sname = ".debug_line"; ssym = Some line_symbol; bytes = line; relocs = List.rev !line_relocs } ]
+      { sname = ".debug_line"; ssym = Some line_symbol; bytes = line; relocs = List.rev !line_relocs };
+      { sname = ".debug_str"; ssym = Some str_symbol; bytes = Buffer.to_bytes strings; relocs = [] };
+      { sname = ".debug_line_str"; ssym = Some line_str_symbol; bytes = Buffer.to_bytes line_strings; relocs = [] } ]
     @ (if !used_loclists then
          [ { sname = ".debug_loclists"; ssym = Some loclists_symbol; bytes = list_bytes loclists; relocs = List.rev !loc_relocs } ]
        else [])

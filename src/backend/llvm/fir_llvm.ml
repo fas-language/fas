@@ -192,10 +192,14 @@ type how =
   | Hplain of ty * string  (** as LLVM passes the type; the extension attribute *)
   | Hparts of int * int * (int * A.eightbyte) list  (** agg size, align, its parts *)
   | Hmem of int * int  (** agg size, align: a byval pointer *)
+  | Hms_bits of int  (** a small aggregate passed as an integer *)
+  | Hms_ref of int * int  (** a pointer to the caller's private copy *)
 
 type rhow =
   | Rplain of ty * string
   | Rparts of int * int * (int * A.eightbyte) list
+  | Rms_bits of int
+  | Rms_xmm
   | Rsret of int * int
   | Rx87 of int  (** an agg of one f80 (X87, X87UP) or two (COMPLEX_X87): st0, st1 *)
 
@@ -258,12 +262,33 @@ let rec plan_ret (a : abi) =
       | A.Memory -> Rsret (size, align)
       | A.Regs ebs -> Rparts (size, align, ebs))
 
+let plan_ms_arg (a : abi) =
+  match agg_view a with
+  | Agg { size; _ } when A.ms_reg_size size -> Hms_bits size
+  | Agg { size; align; _ } -> Hms_ref (size, align)
+  | Scalar (Int 128) -> Hms_ref (16, 16)
+  | Scalar t | Ext (t, _) -> Hplain (t, "")
+  | Cplx _ -> assert false
+
+let plan_ms_ret (a : abi) =
+  match agg_view a with
+  | Agg { size; _ } when A.ms_reg_size size -> Rms_bits size
+  | Agg { size; align; _ } -> Rsret (size, align)
+  | Scalar (Int 128) -> Rms_xmm
+  | Scalar t | Ext (t, _) -> Rplain (t, "")
+  | Cplx _ -> assert false
+
+let int_bytes size = "i" ^ string_of_int (8 * size)
+let cc_text (s : signature) = if s.ms_abi then "win64cc " else ""
+
 let part_ty = function A.Eint -> "i64" | A.Esse -> "double" | A.Esse16 -> "<2 x i64>"
 
 (* the LLVM parameters one argument becomes: type, attributes *)
 let lparams = function
   | Hplain (t, e) -> [ (lty t, e) ]
   | Hparts (_, _, ps) -> List.map (fun (_, eb) -> (part_ty eb, "")) ps
+  | Hms_bits size -> [ (int_bytes size, "") ]
+  | Hms_ref _ -> [ ("ptr", "") ]
   | Hmem (size, align) -> [ ("ptr", Printf.sprintf " byval([%d x i8]) align %d" size (max 8 align)) ]
 
 let sret_attr (size, align) = Printf.sprintf " sret([%d x i8]) align %d" size align
@@ -280,15 +305,26 @@ type lsig = {
   block : (int * int) option;  (** their block's size and alignment *)
 }
 
-let lower_sig what (result_abis : abi list) (abis : abi list) =
+let lower_sig what (sig_ : signature) (abis : abi list) =
+  let result_abis = sig_.result_abis in
+  if sig_.ms_abi && List.length result_abis > 1 then
+    unsupported "%s: multiple results with the Microsoft x64 calling convention" what;
+  let ms_abi_view a =
+    match a with
+    | Scalar (Vec _ as t) when A.vec_bytes t > 16 -> (A.vec_agg t, Some t)
+    | Scalar (Vec _) -> (a, None)
+    | Scalar (Int 128 as t) -> (a, Some t)
+    | _ -> c_abi a
+  in
+  let abi_view = if sig_.ms_abi then ms_abi_view else c_abi in
   let rplan =
     match result_abis with
+    | [ _ ] when sig_.ms_xmm_result -> Some (Rms_xmm, None)
     | [ a ] ->
-        let a, vf = c_abi a in
-        Some (plan_ret a, vf)
+        let a, vf = abi_view a in
+        Some ((if sig_.ms_abi then plan_ms_ret a else plan_ret a), vf)
     | _ -> None
   in
-  ignore what;
   let multi, block =
     match result_abis with
     | _ :: _ :: _ ->
@@ -298,8 +334,12 @@ let lower_sig what (result_abis : abi list) (abis : abi list) =
     | _ -> (None, None)
   in
   let sret = match rplan with Some (Rsret (s, a), _) -> Some (s, a) | _ -> None in
-  let cabis = List.map c_abi abis in
-  let hows = plan_args ~sret:(sret <> None || block <> None) (List.map fst cabis) in
+  let cabis = List.map abi_view abis in
+  let cabi_args = List.map fst cabis in
+  let hows =
+    if sig_.ms_abi then List.map plan_ms_arg cabi_args
+    else plan_args ~sret:(sret <> None || block <> None) cabi_args
+  in
   { rplan; sret; hows = List.map2 (fun h (_, vf) -> (h, vf)) hows cabis; multi; block }
 
 (* the LLVM type of a result of several in a register: an Ext widened to
@@ -326,6 +366,8 @@ let lret_ty what result_abis (l : lsig) =
   | None when l.multi <> None -> (multi_ret_ty l, "")
   | None -> results_ty what result_abis
   | Some (Rplain (t, e), _) -> (lty t, e)
+  | Some (Rms_xmm, _) -> ("<2 x i64>", "")
+  | Some (Rms_bits size, _) -> (int_bytes size, "")
   | Some (Rsret _, _) | Some (Rparts (_, _, []), _) -> ("void", "")
   | Some (Rparts (_, _, [ (_, eb) ]), _) -> (part_ty eb, "")
   | Some (Rparts (_, _, ps), _) -> ("{ " ^ String.concat ", " (List.map (fun (_, eb) -> part_ty eb) ps) ^ " }", "")
@@ -426,6 +468,8 @@ type fcx = {
   mutable nslot : int;
   fsig : lsig;  (** this function's lowered signature *)
   pclmul : bool;  (** the target has pclmulqdq (clmul) *)
+  cbr_map : (value, string * string * int) Hashtbl.t;
+  mutable cur_block : int;
 }
 
 let temp cx =
@@ -482,6 +526,9 @@ and v cx x =
   | Const c -> const_text cx c
   | Param (0, k) -> "%a" ^ string_of_int k
   | Result _ | Param _ -> "%v" ^ string_of_int x
+  | Term_result _ ->
+      if Hashtbl.mem cx.cbr_map x then Printf.sprintf "%%v%d.b%d" x cx.cur_block
+      else "%v" ^ string_of_int x
   | Alias _ | Unset -> unsupported "@%s: undefined value %d" f.name x
 
 let tyv cx x = ty_of cx.f (resolve cx.f x)
@@ -596,6 +643,11 @@ let agg_addr cx x vf size align =
       s
   | None -> v cx x
 
+let ms_load_bits cx size p =
+  let t = temp cx and ty = int_bytes size in
+  line cx (Printf.sprintf "%s = load %s, ptr %s, align 1" t ty p);
+  ty ^ " " ^ t
+
 (* the argument texts of one argument *)
 let arg_texts cx x (how, vf) =
   match how with
@@ -608,6 +660,17 @@ let arg_texts cx x (how, vf) =
       | None -> [ lty t ^ e ^ " " ^ v cx x ])
   | Hmem (size, align) ->
       [ Printf.sprintf "ptr byval([%d x i8]) align %d %s" size (max 8 align) (agg_addr cx x vf size align) ]
+  | Hms_bits size -> [ ms_load_bits cx size (agg_addr cx x vf size size) ]
+  | Hms_ref (size, source_align) ->
+      let align = max 16 source_align in
+      let p = match vf with
+        | Some _ -> agg_addr cx x vf size align
+        | None ->
+            let p = slot cx (max 1 size) align in
+            memcpy cx p align (v cx x) source_align size;
+            p
+      in
+      [ "ptr " ^ p ]
   | Hparts (size, align, ps) -> if ps = [] then [] else load_parts cx (fill_parts cx x vf size align) ps
 
 (* the Fir value [res] of an agg result stored at [s] *)
@@ -706,6 +769,9 @@ let emit_asm ?goto cx (ir : inst_rec) ~tmpl ~aflags ~(outs : asm_operand array) 
     try Fir_asm.parse ~labels ~intel ~tmpl ~outs:(pairs outs) ~ins:(pairs ins) ~clobbers
     with Fir_asm.Bad m -> unsupported "@%s: %s" cx.f.name m
   in
+  if Array.exists (fun (c : Fir_asm.con) -> List.mem "rsp" c.regs) st.outs
+     || Array.exists (fun (c : Fir_asm.con) -> List.mem "rsp" c.regs) st.ins then
+    unsupported "@%s: an explicit rsp operand requires the native backend" cx.f.name;
   let sort l = List.sort_uniq compare l in
   (* registers -> LLVM letters *)
   let reg_letters regs =
@@ -786,6 +852,8 @@ let emit_asm ?goto cx (ir : inst_rec) ~tmpl ~aflags ~(outs : asm_operand array) 
       (fun c ->
         match Fir_asm.clobber c with
         | Fir_asm.Creg r -> [ "~{" ^ r ^ "}" ]
+        | Cx87 0 -> [ "~{st}" ]
+        | Cx87 k -> [ Printf.sprintf "~{st(%d)}" k ]
         | Cmemory -> [ "~{memory}" ]
         | Cflags -> []
         | Cignored -> [ "~{" ^ String.lowercase_ascii c ^ "}" ])
@@ -827,9 +895,15 @@ let emit_asm ?goto cx (ir : inst_rec) ~tmpl ~aflags ~(outs : asm_operand array) 
   | [] -> line cx call
   | [ _ ] -> line cx (res ir 0 ^ " = " ^ call)
   | _ ->
-      let t = temp cx in
-      line cx (t ^ " = " ^ call);
-      List.iteri (fun k _ -> line cx (Printf.sprintf "%s = extractvalue %s %s, %d" (res ir k) ret t k)) rtys
+      if goto <> None then begin
+        let t = Printf.sprintf "%%cbr%d" ir.results.(0) in
+        line cx (t ^ " = " ^ call)
+      end
+      else begin
+        let t = temp cx in
+        line cx (t ^ " = " ^ call);
+        List.iteri (fun k _ -> line cx (Printf.sprintf "%s = extractvalue %s %s, %d" (res ir k) ret t k)) rtys
+      end
 
 let emit_inst cx (ir : inst_rec) =
   let f = cx.f in
@@ -1082,11 +1156,11 @@ let emit_inst cx (ir : inst_rec) =
       line cx (Printf.sprintf "%s = extractvalue %s %s, 0" (r 0) st s);
       line cx (Printf.sprintf "%s = extractvalue %s %s, 1" (r 1) st s)
   | Icmp (k, a, b) -> def (Printf.sprintf "icmp %s %s, %s" (icmp_text k) (tv cx a) (v cx b))
-  | Fcmp (k, _, a, b) when strict cx ->
-      (* quiet, as the native ucomis: invalid only for a signaling NaN *)
+  | Fcmp (k, fl, a, b) when strict cx ->
       let t = tyv cx a in
       let rt = match t with Vec (n, _) -> Printf.sprintf "<%d x i1>" n | _ -> "i1" in
-      let name = "llvm.experimental.constrained.fcmp." ^ sfx t in
+      let op = if has fl f_signaling then "fcmps" else "fcmp" in
+      let name = "llvm.experimental.constrained." ^ op ^ "." ^ sfx t in
       intrinsic cx name rt [ lty t; lty t; "metadata"; "metadata" ];
       def
         (Printf.sprintf "call %s @%s(%s, %s, metadata !\"%s\", metadata !\"fpexcept.strict\")" rt name (tv cx a)
@@ -1537,7 +1611,7 @@ let emit_inst cx (ir : inst_rec) =
             else match List.assoc_opt k va_aggs with Some a -> a | None -> Scalar (tyv cx x))
           (Array.to_list args)
       in
-      let l = lower_sig what sig_.result_abis abis in
+      let l = lower_sig what sig_ abis in
       let ret, ret_ext = lret_ty what sig_.result_abis l in
       let sret_slot = Option.map (fun (size, align) -> slot cx size (max 8 align)) l.sret in
       let block_slot = Option.map (fun (size, align) -> (slot cx size (max 8 align), max 8 align)) l.block in
@@ -1563,10 +1637,15 @@ let emit_inst cx (ir : inst_rec) =
         flag_text attrs [ (a_noreturn, "noreturn"); (a_returns_twice, "returns_twice"); (a_nounwind, "nounwind") ]
       in
       (* a callee handed one of this frame's slots is no tail call *)
-      let tail = has attrs a_tail && l.sret = None && l.block = None && not (List.exists (function Hmem _, _ -> true | _ -> false) l.hows) in
+      let tail = has attrs a_tail && l.sret = None && l.block = None && not (List.exists (function (Hmem _ | Hms_ref _), _ -> true | _ -> false) l.hows) in
       let text =
-        Printf.sprintf "%scall%s %s%s(%s)%s" (if tail then "tail " else "") ret_ext fn_ty callee_text
-          (String.concat ", " arg_text) fattrs
+        let tail = if tail then "tail " else "" in
+        if sig_.ms_abi then
+          Printf.sprintf "%scall win64cc %s%s(%s)%s" tail fn_ty callee_text
+            (String.concat ", " arg_text) fattrs
+        else
+          Printf.sprintf "%scall%s %s%s(%s)%s" tail ret_ext fn_ty callee_text
+            (String.concat ", " arg_text) fattrs
       in
       (match (l.rplan, ir.results) with
       | _, [||] -> line cx text
@@ -1606,6 +1685,18 @@ let emit_inst cx (ir : inst_rec) =
           line cx (s ^ " = " ^ text);
           Array.iteri (fun k _ -> line cx (Printf.sprintf "%s = extractvalue %s %s, %d" (r k) ret s k)) rs
       | Some (Rsret _, vf), _ -> line cx text; def_from_slot cx (r 0) vf (Option.get sret_slot)
+      | Some (Rms_xmm, vf), _ ->
+          let s = slot cx 16 16 in
+          let t = temp cx in
+          line cx (t ^ " = " ^ text);
+          line cx (Printf.sprintf "store <2 x i64> %s, ptr %s, align 16" t s);
+          def_from_slot cx (r 0) vf s
+      | Some (Rms_bits size, vf), _ ->
+          let s = slot cx size 16 in
+          let t = temp cx in
+          line cx (t ^ " = " ^ text);
+          line cx (Printf.sprintf "store %s %s, ptr %s, align 1" (int_bytes size) t s);
+          def_from_slot cx (r 0) vf s
       | Some (Rparts (size, align, ps), vf), _ ->
           let s = parts_slot cx size align vf in
           (match ps with
@@ -1750,11 +1841,11 @@ let emit_term cx b (labels : string array) =
       line cx
         (Printf.sprintf "indirectbr %s, [%s]" (tv cx x)
            (String.concat ", " (Array.to_list (Array.mapi (fun k _ -> lab k) bs))))
-  | Asm_goto { tmpl; aflags; ins; aargs; clobbers; labels; _ } ->
+  | Asm_goto { tmpl; aflags; outs; ins; aargs; aresults; clobbers; labels; _ } ->
       emit_asm cx
         ~goto:(labels_.(0), Array.to_list (Array.mapi (fun k _ -> labels_.(k + 1)) labels))
-        { op = Nop; results = [||]; loc = 0 }
-        ~tmpl ~aflags ~outs:[||] ~ins ~aargs ~clobbers
+        { op = Nop; results = aresults; loc = 0 }
+        ~tmpl ~aflags ~outs ~ins ~aargs ~clobbers
   | Ret [||] -> line cx "ret void"
   | Ret [| x |] -> (
       match cx.fsig.rplan with
@@ -1768,6 +1859,13 @@ let emit_term cx b (labels : string array) =
           | Some _ -> line cx (Printf.sprintf "store %s, ptr %%sret, align %d" (tv cx x) (max 8 align))
           | None -> memcpy cx "%sret" (max 1 align) (v cx x) align size);
           line cx "ret void"
+      | Some (Rms_xmm, vf) ->
+          let p = agg_addr cx x vf 16 16 in
+          let t = temp cx in
+          line cx (Printf.sprintf "%s = load <2 x i64>, ptr %s, align 16" t p);
+          line cx ("ret <2 x i64> " ^ t)
+      | Some (Rms_bits size, vf) ->
+          line cx ("ret " ^ ms_load_bits cx size (agg_addr cx x vf size size))
       | Some (Rparts (size, align, ps), vf) -> (
           let s = fill_parts cx x vf size align in
           match load_parts cx s ps with
@@ -1957,6 +2055,9 @@ let render_bounded ?(redirect = Fun.id) ?(debug_info = false) ?target ?data_layo
       add o "; ModuleID = 'fas'\nsource_filename = \"fas\"\n";
       Option.iter (fun dl -> add o (Printf.sprintf "target datalayout = \"%s\"\n" dl)) data_layout;
       add o (Printf.sprintf "target triple = \"%s\"\n\n" m.triple);
+      Vec.iter
+        (fun f -> if Option.is_some f.unwind_cleanup then unsupported "@%s: native cleanup landing pad" f.name)
+        m.funcs;
       (* top-level asm, one LLVM line per text line *)
       List.iter
         (fun a ->
@@ -1977,18 +2078,19 @@ let render_bounded ?(redirect = Fun.id) ?(debug_info = false) ?target ?data_layo
                  (visibility_text g.glinkage g.gvisibility) tls kind g.size section align)
           else begin
             let linkage =
-              match g.glinkage with Local -> if g.readonly then "private " else "internal " | l -> linkage_text l
+              if g.gcommon then "common "
+              else match g.glinkage with Local -> if g.readonly then "private " else "internal " | l -> linkage_text l
             in
             let ty, init =
               match g.init with
               | None -> (Printf.sprintf "[%d x i8]" g.size, "zeroinitializer")
               | Some pieces ->
-                  let len = List.fold_left (fun acc p -> acc + match p with Bytes s -> String.length s | Zeros k -> k | Reloc { width; _ } -> width | Blockref _ -> 8) 0 pieces in
+                  let len = List.fold_left (fun acc p -> acc + init_piece_size p) 0 pieces in
                   let pieces = if len < g.size then pieces @ [ Zeros (g.size - len) ] else pieces in
                   let at = ref 0 in
                   let piece p =
                     let here = !at in
-                    (at := here + match p with Bytes s -> String.length s | Zeros k -> k | Reloc { width; _ } -> width | Blockref _ -> 8);
+                    at := here + init_piece_size p;
                     match p with
                     | Bytes s -> (Printf.sprintf "[%d x i8]" (String.length s), "c\"" ^ escaped s ^ "\"")
                     | Zeros k -> (Printf.sprintf "[%d x i8]" k, "zeroinitializer")
@@ -2003,6 +2105,11 @@ let render_bounded ?(redirect = Fun.id) ?(debug_info = false) ?target ?data_layo
                     | Reloc { width; _ } -> unsupported "@%s: a %d-byte data relocation on the LLVM path" g.gname width
                     | Blockref { block = 0; _ } -> unsupported "@%s: blockaddr of an entry block" g.gname
                     | Blockref { fn; block } -> ("ptr", Printf.sprintf "blockaddress(%s, %%b%d)" (sym fn) block)
+                    | Blockdiff { fn; lhs; rhs; width } ->
+                        let addr block = Printf.sprintf "i64 ptrtoint (ptr blockaddress(%s, %%b%d) to i64)" (sym fn) block in
+                        let diff = Printf.sprintf "sub (%s, %s)" (addr lhs) (addr rhs) in
+                        let ty = Printf.sprintf "i%d" (width * 8) in
+                        (ty, if width = 8 then diff else Printf.sprintf "trunc (i64 %s to %s)" diff ty)
                   in
                   let all_zero = List.for_all (function Zeros _ -> true | Bytes s -> String.for_all (( = ) '\000') s | _ -> false) pieces in
                   if all_zero then (Printf.sprintf "[%d x i8]" g.size, "zeroinitializer")
@@ -2031,6 +2138,12 @@ let render_bounded ?(redirect = Fun.id) ?(debug_info = false) ?target ?data_layo
             (Printf.sprintf "%s = %s%s%salias i8, %s\n" (sym a.aname) (linkage_text a.alinkage) (visibility_text a.alinkage a.avisibility)
                (if Hashtbl.mem tls_names a.aname then "thread_local " else "") target))
         m.aliases;
+      Vec.iter
+        (fun (iv : ifunc) ->
+          add o
+            (Printf.sprintf "%s = %s%sifunc void (), ptr %s\n" (sym iv.iname) (linkage_text iv.ilinkage)
+               (visibility_text iv.ilinkage iv.ivisibility) (sym iv.resolver)))
+        m.ifuncs;
       (* a defined global in a named section is part of the program even when
          nothing here names it (a registry walked between __start_s and
          __stop_s), so LLVM must not drop it *)
@@ -2040,7 +2153,7 @@ let render_bounded ?(redirect = Fun.id) ?(debug_info = false) ?target ?data_layo
           (Printf.sprintf "@llvm.compiler.used = appending global [%d x ptr] [%s], section \"llvm.metadata\"\n"
              (List.length kept)
              (String.concat ", " (List.rev_map (fun n -> "ptr " ^ sym n) kept)));
-      if Vec.length m.globals > 0 || Vec.length m.aliases > 0 then add o "\n";
+      if Vec.length m.globals > 0 || Vec.length m.aliases > 0 || Vec.length m.ifuncs > 0 then add o "\n";
       let attr_refs ~definition =
         (if no_builtin <> [] then " #0" else "") ^ if definition && target <> None then " #1" else ""
       in
@@ -2055,14 +2168,19 @@ let render_bounded ?(redirect = Fun.id) ?(debug_info = false) ?target ?data_layo
            else if has f.fattrs fa_mem_read then " memory(read)"
            else if has f.fattrs fa_mem_argmem then " memory(argmem: readwrite)"
            else "")
-        ^ if has f.fattrs fa_willreturn then " willreturn" else ""
+        ^ (if has f.fattrs fa_willreturn then " willreturn" else "")
+        ^ (if definition && has f.fattrs fa_nocf_check then " nocf_check" else "")
+        ^ match f.patchable with
+          | Some (n, before) when definition ->
+              Printf.sprintf " \"patchable-function-entry\"=\"%d\" \"patchable-function-prefix\"=\"%d\"" (n - before) before
+          | _ -> ""
       in
       let declared = Hashtbl.create 64 in
       Vec.iter
         (fun f ->
           Hashtbl.replace declared f.name ();
           let what = "@" ^ f.name in
-          let fsig = lower_sig what f.sig_.result_abis f.sig_.param_abis in
+          let fsig = lower_sig what f.sig_ f.sig_.param_abis in
           let ret, ret_ext = lret_ty what f.sig_.result_abis fsig in
           let ret_ext = if ret_ext = "" then "" else String.sub ret_ext 1 (String.length ret_ext - 1) ^ " " in
           if not f.defined then begin
@@ -2070,8 +2188,8 @@ let render_bounded ?(redirect = Fun.id) ?(debug_info = false) ?target ?data_layo
               let params = List.map (fun (t, e) -> t ^ e) (lparams_all fsig) in
               let params = if f.sig_.variadic then params @ [ "..." ] else params in
               add o
-                (Printf.sprintf "declare %s%s%s %s(%s)%s%s\n" (if f.linkage = Weak then "extern_weak " else "")
-                   ret_ext ret (sym f.name) (String.concat ", " params) (fattr_text f ~definition:false)
+                (Printf.sprintf "declare %s%s%s%s %s(%s)%s%s\n" (if f.linkage = Weak then "extern_weak " else "")
+                   (cc_text f.sig_) ret_ext ret (sym f.name) (String.concat ", " params) (fattr_text f ~definition:false)
                    (attr_refs ~definition:false))
             end
           end
@@ -2098,11 +2216,22 @@ let render_bounded ?(redirect = Fun.id) ?(debug_info = false) ?target ?data_layo
                          fid fid line d.subroutine_type line);
                     Some (id, file, line)
             in
+            let cbr_map = Hashtbl.create 4 in
+            for b = 0 to num_blocks f - 1 do
+              match (block f b).term with
+              | Asm_goto { aresults; _ } when Array.length aresults >= 2 ->
+                  let ret_ty =
+                    "{ " ^ String.concat ", " (Array.to_list (Array.map (fun r -> lty (ty_of f r)) aresults)) ^ " }"
+                  in
+                  let t = Printf.sprintf "%%cbr%d" aresults.(0) in
+                  Array.iteri (fun k r -> Hashtbl.replace cbr_map r (t, ret_ty, k)) aresults
+              | _ -> ()
+            done;
             let cx =
               { m; f; o = { buf = Buffer.create 4096; counted = o.counted; budget = o.budget }; sym; intrinsics;
                 intrinsic_order; tmp = 0; d; sp = Option.map (fun (id, file, _) -> (id, file)) sp;
                 cur = (match sp with Some (_, file, line) -> (file, line, 0) | None -> ("", 0, 0));
-                allocas = Buffer.create 256; nslot = 0; fsig; pclmul }
+                allocas = Buffer.create 256; nslot = 0; fsig; pclmul; cbr_map; cur_block = 0 }
             in
             (* LLVM parameters: %a<k> for a plain one, %a<k>.<j> for the
                parts of an agg, %a<k>.p for a byval pointer to a vector or
@@ -2116,17 +2245,19 @@ let render_bounded ?(redirect = Fun.id) ?(debug_info = false) ?target ?data_layo
                        match (h, vf) with
                        | Hplain (t, e), None -> [ Printf.sprintf "%s%s %%a%d" (lty t) e k ]
                        | Hplain (t, e), Some _ -> [ Printf.sprintf "%s%s %%a%d.w" (lty t) e k ]
-                       | Hmem _, _ ->
+                       | (Hmem _ | Hms_ref _), _ ->
                            let t, e = List.hd (lparams h) in
                            [ Printf.sprintf "%s%s %%a%d%s" t e k (if vf = None then "" else ".p") ]
+                       | Hms_bits size, _ -> [ Printf.sprintf "%s %%a%d.bits" (int_bytes size) k ]
                        | Hparts (_, _, ps), _ -> List.mapi (fun j (_, eb) -> Printf.sprintf "%s %%a%d.%d" (part_ty eb) k j) ps)
                      fsig.hows)
             in
             let params = if f.sig_.variadic then params @ [ "..." ] else params in
             add o
-              (Printf.sprintf "define %s%s%s%s %s(%s)%s%s" (linkage_text f.linkage) (visibility_text f.linkage f.visibility)
-                 ret_ext ret (sym f.name) (String.concat ", " params) (fattr_text f ~definition:true)
+              (Printf.sprintf "define %s%s%s%s%s %s(%s)%s%s" (linkage_text f.linkage) (visibility_text f.linkage f.visibility)
+                 (cc_text f.sig_) ret_ext ret (sym f.name) (String.concat ", " params) (fattr_text f ~definition:true)
                  (attr_refs ~definition:true));
+            Option.iter (fun s -> add o (Printf.sprintf " section \"%s\"" (escaped s))) f.code_section;
             Option.iter (fun (id, _, _) -> add_debug o (Printf.sprintf " !dbg !%d" id)) sp;
             add o " {\n";
             add o (label entry ^ ":\n");
@@ -2139,6 +2270,9 @@ let render_bounded ?(redirect = Fun.id) ?(debug_info = false) ?target ?data_layo
             List.iteri
               (fun k (h, vf) ->
                 match (h, vf) with
+                | Hms_bits size, _ ->
+                    let s = named_slot cx (Printf.sprintf "%%a%d" k) size size in
+                    line cx (Printf.sprintf "store %s %%a%d.bits, ptr %s, align 1" (int_bytes size) k s)
                 | Hparts (size, align, ps), _ ->
                     let s =
                       if vf = None then named_slot cx (Printf.sprintf "%%a%d" k) (max 16 (align_up size 8)) (max 16 align)
@@ -2150,10 +2284,11 @@ let render_bounded ?(redirect = Fun.id) ?(debug_info = false) ?target ?data_layo
                       ps;
                     Option.iter (fun t -> line cx (Printf.sprintf "%%a%d = load %s, ptr %s, align 16" k (lty t) s)) vf
                 | Hplain (t, _), Some wt -> line cx (Printf.sprintf "%%a%d = trunc %s %%a%d.w to %s" k (lty t) k (lty wt))
-                | Hmem (_, align), Some t -> line cx (Printf.sprintf "%%a%d = load %s, ptr %%a%d.p, align %d" k (lty t) k (max 8 align))
+                | (Hmem (_, align) | Hms_ref (_, align)), Some t -> line cx (Printf.sprintf "%%a%d = load %s, ptr %%a%d.p, align %d" k (lty t) k (max 8 align))
                 | _ -> ())
               fsig.hows;
             for b = 0 to num_blocks f - 1 do
+              cx.cur_block <- b;
               let br = block f b in
               if b > 0 then begin
                 add o "\n";
@@ -2168,8 +2303,38 @@ let render_bounded ?(redirect = Fun.id) ?(debug_info = false) ?target ?data_layo
                     | ins ->
                         add o
                           (Printf.sprintf "  %%v%d = phi %s %s\n" p t
-                             (String.concat ", " (List.map (fun (args, l) -> Printf.sprintf "[ %s, %%%s ]" (v cx args.(k)) l) ins))))
+                             (String.concat ", "
+                                (List.map
+                                   (fun (args, l) ->
+                                     let x = resolve f args.(k) in
+                                     let vtxt =
+                                       if Hashtbl.mem cx.cbr_map x then
+                                         let pred_b =
+                                           let s = String.sub l 1 (String.length l - 1) in
+                                           match String.index_opt s '.' with
+                                           | Some dot -> int_of_string (String.sub s 0 dot)
+                                           | None -> int_of_string s
+                                         in
+                                         Printf.sprintf "%%v%d.b%d" x pred_b
+                                       else v cx x
+                                     in
+                                     Printf.sprintf "[ %s, %%%s ]" vtxt l)
+                                   ins))))
                   br.params;
+              if Hashtbl.length cx.cbr_map > 0 then begin
+                let need = Hashtbl.create 4 in
+                let note x =
+                  let x = resolve f x in
+                  if Hashtbl.mem cx.cbr_map x then Hashtbl.replace need x ()
+                in
+                Vec.iter (fun i -> iter_op_uses note (inst f i).op) br.insts;
+                iter_term_uses note br.term;
+                Hashtbl.iter
+                  (fun x () ->
+                    let t, ret_ty, k = Hashtbl.find cx.cbr_map x in
+                    line cx (Printf.sprintf "%%v%d.b%d = extractvalue %s %s, %d" x b ret_ty t k))
+                  need
+              end;
               Vec.iter (fun i -> emit_inst cx (inst f i)) br.insts;
               emit_term cx b edge_labels.(b);
               List.iter

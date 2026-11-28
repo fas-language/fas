@@ -15,6 +15,7 @@ let apply (rename : string -> string) (m : modul) =
     Vec.fold (fun acc f -> acc || rename f.name <> f.name) false m.funcs
     || Vec.fold (fun acc g -> acc || rename g.gname <> g.gname) false m.globals
     || Vec.fold (fun acc a -> acc || rename a.aname <> a.aname || rename a.target <> a.target) false m.aliases
+    || Vec.fold (fun acc iv -> acc || rename iv.iname <> iv.iname || rename iv.resolver <> iv.resolver) false m.ifuncs
   in
   if changes then begin
     Vec.iteri
@@ -55,9 +56,11 @@ let apply (rename : string -> string) (m : modul) =
         let piece = function
           | Reloc r -> Reloc { r with sym = rename r.sym }
           | Blockref b -> Blockref { b with fn = rename b.fn }
+          | Blockdiff b -> Blockdiff { b with fn = rename b.fn }
           | p -> p
         in
         Vec.set m.globals i { g with gname = rename g.gname; init = Option.map (List.map piece) g.init })
       m.globals;
-    Vec.iteri (fun i a -> Vec.set m.aliases i { a with aname = rename a.aname; target = rename a.target }) m.aliases
+    Vec.iteri (fun i a -> Vec.set m.aliases i { a with aname = rename a.aname; target = rename a.target }) m.aliases;
+    Vec.iteri (fun i iv -> Vec.set m.ifuncs i { iv with iname = rename iv.iname; resolver = rename iv.resolver }) m.ifuncs
   end

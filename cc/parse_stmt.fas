@@ -1,0 +1,576 @@
+// cc2/parse_stmt.fas: Statement parser, label/jump validation, and function body arena lifecycle.
+
+struct VmBarrier {
+    previous handle[VmBarrier]
+    statement_expr bool
+}
+struct Jump { label handle[Label], vm handle[VmBarrier], loc u32, next handle[Jump] }
+
+fn pa_check_jump(p handle[Parser], from handle[VmBarrier], to handle[VmBarrier], loc u32) void fails {
+    while from != null && from != to { from = from.previous }
+    if from != to {
+        if to.statement_expr { try pa_error(p, loc, c"jump enters a statement expression") }
+        try pa_error(p, loc, c"jump enters the scope of a variably modified declaration")
+    }
+}
+
+fn pa_add_jump(p handle[Parser], label handle[Label], loc u32) void {
+    label.used = true
+    jump handle[Jump] = pa_alloc[Jump](p)
+    jump.loc = loc
+    jump.vm = p.vm
+    jump.label = label
+    jump.next = p.jumps
+    p.jumps = jump
+}
+
+struct CaseRange { lo addr, hi addr, loc u32 }
+struct SwitchContext {
+    parent handle[SwitchContext]
+    ranges Vec[CaseRange]
+    ty u32
+    has_default bool
+    vm handle[VmBarrier]
+}
+
+fn pa_get_label(p handle[Parser], t Token) handle[Label] fails {
+    if p.function == null { try pa_error(p, t.loc, c"label outside function") }
+    name u32 = try pa_ident(p, t)
+    local handle[Label] = pa_llab_lookup(p, name, false)
+    if local != null { return local }
+    a addr = map_get(&p.labels, name) catch {
+        l handle[Label] = pa_alloc[Label](p)
+        l.name = name
+        l.loc = t.loc
+        map_put(&p.labels, name, handle_addr(l))
+        vec_push[addr](&p.label_list, handle_addr(l))
+        return l
+    }
+    return handle_from_addr(a)
+}
+
+fn pa_local_labels(p handle[Parser]) handle[Ast] fails {
+    t Token = try pa_take(p)
+    try pa_gnu(p, t)
+    while true {
+        item Token = try pa_take(p)
+        name u32 = try pa_ident(p, item)
+        if pa_llab_lookup(p, name, true) != null {
+            try pa_error(p, item.loc, c"duplicate local label declaration")
+        }
+        l handle[Label] = pa_alloc[Label](p)
+        l.loc = item.loc
+        l.name = name
+        pa_bind_llab(p, name, l)
+        vec_push[addr](&p.label_list, handle_addr(l))
+        if !(try pa_accept_k(p, TK_COMMA)) { break }
+    }
+    try pa_expect_k(p, TK_SEMI)
+    return null
+}
+
+fn pa_asm_string(p handle[Parser]) handle[Ast] fails {
+    text handle[Ast] = try pa_strings(p)
+    if ty_node(ty_unqual(text.ty)).elem != TY_CHAR {
+        try pa_error(p, text.loc, c"asm requires an ordinary string literal")
+    }
+    return text
+}
+
+fn pa_asm_constraint(p handle[Parser], text handle[Ast], output bool) void fails {
+    cursor StringBytes = {}
+    cursor.piece = text.a
+    defer { buf_free(&cursor.encoded) }
+    if output {
+        first u8 = try se_next_string_byte(p, &cursor)
+        if first != 61 && first != 43 { try pa_error(p, text.loc, c"asm output constraint requires '=' or '+'") }
+    }
+    for i u64 in (if output { 1 } else { 0 })..text.value - 1 {
+        ch u8 = try se_next_string_byte(p, &cursor)
+        if ch < 32 || ch == 127 { try pa_error(p, text.loc, c"invalid control character in asm constraint") }
+    }
+}
+
+fn pa_asm_names(p handle[Parser], text handle[Ast], names handle[TagMap]) void fails {
+    cursor StringBytes = {}
+    cursor.piece = text.a
+    defer { buf_free(&cursor.encoded) }
+    decoded Buf = {}
+    defer { buf_free(&decoded) }
+    for i u64 in 0..text.value - 1 { buf_u8(&decoded, try se_next_string_byte(p, &cursor)) }
+    i usize = 0
+    while i + 1 < decoded.n {
+        ch u8 = decoded.p[u8, i]
+        i += 1
+        if ch != 37 { continue }
+        next u8 = decoded.p[u8, i]
+        if cc_id_ascii(next, true, false) { i += 1 }
+        if i == decoded.n { break }
+        ch = decoded.p[u8, i]
+        i += 1
+        if ch != 91 { continue }
+        start usize = i
+        while i < decoded.n && decoded.p[u8, i] != 93 { i += 1 }
+        if i == decoded.n { try pa_error(p, text.loc, c"unterminated named asm operand") }
+        name u32 = sym_intern(&p.ctx.syms, decoded.p + start, i - start)
+        if !map_has(names, name) { try pa_error(p, text.loc, c"undefined named asm operand") }
+        i += 1
+    }
+}
+
+fn pa_asm(p handle[Parser], file bool) handle[Ast] fails {
+    t Token = try pa_take(p)
+    n handle[Ast] = pa_node(p, ND_ASM, t.loc, TY_VOID)
+    while true {
+        a Token = p.cur
+        kw u8 = pa_kw(p, a)
+        flag u16 = 0
+        if kw == KW_GOTO { flag = 1 }
+        else if kw == KW_VOLATILE { flag = 2 }
+        else if kw == KW_INLINE { flag = 4 }
+        else { break }
+        if file || (n.flags & flag) != 0 { try pa_error(p, a.loc, c"invalid or duplicate asm qualifier") }
+        n.flags |= flag
+        try pa_bump(p)
+    }
+    try pa_expect_k(p, TK_LPAREN)
+    n.a = try pa_asm_string(p)
+    section u8 = 0
+    names TagMap = {}
+    defer { map_free(&names) }
+    while p.cur.kind == TK_COLON || p.cur.kind == TK_DCOLON {
+        sep Token = try pa_take(p)
+        section += if sep.kind == TK_DCOLON { 2 } else { 1 }
+        if file || section > 4 || (section == 4 && (n.flags & 1) == 0) { try pa_error(p, sep.loc, c"invalid asm operand section") }
+        if p.cur.kind == TK_RPAREN || p.cur.kind == TK_COLON || p.cur.kind == TK_DCOLON { continue }
+        xs AstList = {}
+        while true {
+            if section == 4 {
+                lt Token = try pa_take(p)
+                l handle[Label] = try pa_get_label(p, lt)
+                pa_add_jump(p, l, lt.loc)
+                map_put(&names, l.name, 1)
+                item handle[Ast] = pa_node(p, ND_NAME, lt.loc, TY_VOID)
+                item.op = l.name
+                ast_set_extra(p, item, handle_addr(l))
+                pa_append(&xs, item)
+            } else {
+                opname u32 = 0
+                if section <= 2 && (try pa_accept_k(p, TK_LBRACK)) {
+                    tok Token = try pa_take(p)
+                    opname = try pa_ident(p, tok)
+                    if !map_put(&names, opname, 1) { try pa_error(p, tok.loc, c"duplicate named asm operand") }
+                    try pa_expect_k(p, TK_RBRACK)
+                }
+                constraint handle[Ast] = try pa_asm_string(p)
+                if section <= 2 {
+                    try pa_asm_constraint(p, constraint, section == 1)
+                    try pa_expect_k(p, TK_LPAREN)
+                    e handle[Ast] = try pa_expression(p, 1)
+                    try pa_expect_k(p, TK_RPAREN)
+                    if ty_is_void(e.ty) { try pa_error(p, e.loc, c"asm operand cannot have void type") }
+                    if section == 1 {
+                        if ty_is_array(e.ty) {
+                            if !se_addressable(e) || (se_array_quals(e.ty) & Q_CONST) != 0 || !se_complete(e.ty) {
+                                try pa_error(p, e.loc, c"asm output requires a writable array lvalue")
+                            }
+                        } else { try se_modifiable(p, e) }
+                    }
+                    spelling Bytes = sym_name(&p.ctx.syms, constraint.op)
+                    if bytes_eq_c(spelling, c"\"m\"") || bytes_eq_c(spelling, c"\"=m\"") ||
+                        bytes_eq_c(spelling, c"\"+m\"") {
+                        decl handle[Symbol] = e.decl
+                        if !se_addressable(e) || (e.flags & NF_BITFIELD) != 0 ||
+                            (decl != null && decl.storage == SC_REGISTER) {
+                            try pa_error(p, e.loc, c"asm memory operand requires an addressable object")
+                        }
+                    }
+                    item handle[Ast] = pa_node(p, ND_ASM, e.loc, e.ty)
+                    item.op = opname
+                    item.a = constraint
+                    item.b = e
+                    pa_append(&xs, item)
+                } else { pa_append(&xs, constraint) }
+            }
+            if !(try pa_accept_k(p, TK_COMMA)) { break }
+        }
+        if section == 1 { n.b = xs.first }
+        if section == 2 { ast_set_c(p, n, xs.first) }
+        if section == 3 { ast_set_d(p, n, xs.first) }
+        if section == 4 { ast_set_extra(p, n, handle_addr(xs.first)) }
+    }
+    if section != 0 {
+        n.flags |= NF_ASM_EXTENDED
+        try pa_asm_names(p, n.a, &names)
+    }
+    try pa_expect_k(p, TK_RPAREN)
+    try pa_expect_k(p, TK_SEMI)
+    return n
+}
+
+fn pa_block(p handle[Parser], scope bool, statement_expr bool) handle[Ast] fails {
+    t Token = try pa_expect_k(p, TK_LBRACE)
+    incoming_fenv bool = p.fenv_access
+    if scope { pa_enter(p) }
+    defer {
+        if scope { pa_leave(p) }
+        p.fenv_access = incoming_fenv
+    }
+    if statement_expr {
+        barrier handle[VmBarrier] = pa_alloc[VmBarrier](p)
+        barrier.previous = p.vm
+        barrier.statement_expr = true
+        p.vm = barrier
+    }
+    xs AstList = {}
+    while !(try pa_accept_k(p, TK_RBRACE)) {
+        next Token = p.cur
+        if next.kind == TK_EOF { try pa_error(p, next.loc, c"unterminated compound statement") }
+        item handle[Ast] = null
+        leading handle[Attr] = null
+        if next.kind == TK_LBRACK || pa_kw(p, next) == KW_ATTRIBUTE {
+            leading = try pa_attributes(p)
+            next = p.cur
+        }
+        saved_ord usize = p.ord_undo.n
+        saved_expr_chunk addr = p.expr_arena.chunk
+        saved_expr_used usize = p.expr_arena.used
+        is_decl bool = false
+        if next.kind == TK_IDENT && (try pa_at2_k(p, TK_COLON)) {
+            item = try pa_statement_in(p, true)
+        } else if pa_decl_start(p, next) || (pa_kw(p, next) == KW_EXTENSION && pa_decl_start(p, try pa_peek2(p))) {
+            is_decl = true
+            item = try pa_declaration(p, false, leading)
+            leading = null
+        } else if pa_kw(p, next) == KW_LABEL {
+            item = try pa_local_labels(p)
+        } else {
+            item = try pa_statement_in(p, true)
+        }
+        if p.on_function != null || statement_expr {
+            if item != null && leading != null { ast_set_attrs(p, item, pa_join_attrs(leading, ast_attrs(item))) }
+            pa_append(&xs, item)
+        } else if !is_decl && p.switches == null && p.ord_undo.n == saved_ord && p.expr_arena.chunk == saved_expr_chunk {
+            p.expr_arena.used = saved_expr_used
+        }
+    }
+    result u32 = TY_VOID
+    last handle[Ast] = xs.last
+    if last != null && last.kind == ND_STMT && last.op == 0 { result = se_decay(last.ty) }
+    node handle[Ast] = pa_node(p, ND_BLOCK, t.loc, result)
+    node.a = xs.first
+    return node
+}
+
+fn pa_paren_expr(p handle[Parser]) handle[Ast] fails {
+    try pa_expect_k(p, TK_LPAREN)
+    e handle[Ast] = try pa_expression(p, 1)
+    try pa_expect_k(p, TK_RPAREN)
+    return e
+}
+
+fn pa_substatement(p handle[Parser]) handle[Ast] fails {
+    if p.cur.kind == TK_LBRACE { return try pa_block(p, true, false) }
+    pa_enter(p)
+    defer { pa_leave(p) }
+    return try pa_statement(p)
+}
+
+fn pa_case_compare(a handle[Ast], b handle[Ast]) i32 {
+    width u32 = ty_int_bits(a.ty)
+    signed bool = !ty_is_unsigned(a.ty)
+    if width <= 64 {
+        x u64 = a.value
+        y u64 = b.value
+        if signed { x ^= 0x8000000000000000; y ^= 0x8000000000000000 }
+        return if x < y { -1 } else if x > y { 1 } else { 0 }
+    }
+    words u32 = (width + 31) / 32
+    x WideInt = {ast_wide(a), width, words}
+    y WideInt = {ast_wide(b), width, words}
+    if signed && wi_bit(x, width - 1) != wi_bit(y, width - 1) {
+        return if wi_bit(x, width - 1) != 0 { -1 } else { 1 }
+    }
+    return wi_cmp(x, y)
+}
+
+fn pa_case_less(a handle[CaseRange], b handle[CaseRange]) bool {
+    return pa_case_compare(handle_from_addr(a.lo), handle_from_addr(b.lo)) < 0
+}
+
+fn pa_case_bound(p handle[Parser], ty u32) handle[Ast] fails {
+    e handle[Ast] = try pa_expression(p, 3)
+    try se_require_ice(p, e)
+    e = se_convert(p, ty, e)
+    width u32 = ty_int_bits(ty)
+    if width > 64 && ast_wide(e) == null { wi_store(p, e, wi_from_ast(e, width)) }
+    return e
+}
+
+fn pa_check_cases(p handle[Parser], sw handle[SwitchContext]) void fails {
+    sort_vec_by[CaseRange, pa_case_less](&sw.ranges)
+    for i usize in 1..sw.ranges.n {
+        prev handle[CaseRange] = vec_at[CaseRange](&sw.ranges, i - 1)
+        item handle[CaseRange] = vec_at[CaseRange](&sw.ranges, i)
+        if pa_case_compare(handle_from_addr(item.lo), handle_from_addr(prev.hi)) <= 0 {
+            try pa_error(p, item.loc, c"duplicate or overlapping case value")
+        }
+    }
+}
+
+fn pa_case(p handle[Parser], t Token, kw u8, n handle[Ast], in_block bool) void fails {
+    context handle[SwitchContext] = p.switches
+    if context == null { try pa_error(p, t.loc, c"case or default label outside switch") }
+    try pa_check_jump(p, context.vm, p.vm, t.loc)
+    if kw == KW_DEFAULT {
+        if context.has_default { try pa_error(p, t.loc, c"duplicate default label") }
+        context.has_default = true
+    } else {
+        lo handle[Ast] = try pa_case_bound(p, context.ty)
+        hi handle[Ast] = lo
+        n.a = lo
+        if try pa_accept_k(p, TK_ELLIPSIS) {
+            try pa_gnu(p, t)
+            hi = try pa_case_bound(p, context.ty)
+            n.b = hi
+        }
+        if pa_case_compare(lo, hi) <= 0 {
+            range handle[CaseRange] = vec_add[CaseRange](&context.ranges)
+            range.lo = handle_addr(lo)
+            range.hi = handle_addr(hi)
+            range.loc = t.loc
+        }
+    }
+    try pa_expect_k(p, TK_COLON)
+    if !in_block { ast_set_c(p, n, try pa_label_tail(p)) }
+}
+
+fn pa_label_tail(p handle[Parser]) handle[Ast] fails {
+    next Token = p.cur
+    if next.kind == TK_RBRACE || pa_decl_start(p, next) { return null }
+    return try pa_statement(p)
+}
+
+fn pa_statement(p handle[Parser]) handle[Ast] fails { return try pa_statement_in(p, false) }
+
+fn pa_statement_in(p handle[Parser], in_block bool) handle[Ast] fails {
+    t Token = p.cur
+    attrs handle[Attr] = null
+    if t.kind == TK_LBRACK || pa_kw(p, t) == KW_ATTRIBUTE {
+        attrs = try pa_attributes(p)
+        t = p.cur
+    }
+    if t.kind == TK_LBRACE { return try pa_block(p, true, false) }
+    if pa_asm_word(p, t) { return try pa_asm(p, false) }
+    n handle[Ast] = pa_node(p, ND_STMT, t.loc, TY_VOID)
+    if attrs != null { ast_set_attrs(p, n, attrs) }
+    if t.kind == TK_SEMI { try pa_bump(p); return n }
+    kw u8 = pa_kw(p, t)
+    if kw != KW_NONE {
+        n.op = cc_ident(p.ctx, t)
+        if kw == KW_IF {
+            try pa_bump(p)
+            pa_enter(p)
+            defer { pa_leave(p) }
+            n.a = try pa_paren_expr(p)
+            try se_scalar(p, n.a)
+            n.b = try pa_substatement(p)
+            if try pa_accept_kw(p, KW_ELSE) { ast_set_c(p, n, try pa_substatement(p)) }
+            return n
+        }
+        if kw == KW_SWITCH {
+            try pa_bump(p)
+            pa_enter(p)
+            defer { pa_leave(p) }
+            key handle[Ast] = try pa_paren_expr(p)
+            n.a = key
+            if !ty_is_integer(key.ty) { try pa_error(p, t.loc, c"switch requires integer type") }
+            sw SwitchContext = {}
+            sw.parent = p.switches
+            sw.ty = se_promote_expr(n.a)
+            sw.vm = p.vm
+            p.switches = &sw
+            defer {
+                p.switches = sw.parent
+                vec_free(&sw.ranges)
+            }
+            n.b = try pa_substatement(p)
+            try pa_check_cases(p, &sw)
+            return n
+        }
+        if kw == KW_WHILE {
+            try pa_bump(p)
+            pa_enter(p)
+            defer { pa_leave(p) }
+            n.a = try pa_paren_expr(p)
+            try se_scalar(p, n.a)
+            p.loops += 1
+            defer { p.loops -= 1 }
+            n.b = try pa_substatement(p)
+            return n
+        }
+        if kw == KW_DO {
+            try pa_bump(p)
+            pa_enter(p)
+            defer { pa_leave(p) }
+            p.loops += 1
+            defer { p.loops -= 1 }
+            n.b = try pa_substatement(p)
+            try pa_expect_kw(p, KW_WHILE, c"while")
+            n.a = try pa_paren_expr(p)
+            try se_scalar(p, n.a)
+            try pa_expect_k(p, TK_SEMI)
+            return n
+        }
+        if kw == KW_FOR {
+            try pa_bump(p)
+            pa_enter(p)
+            defer { pa_leave(p) }
+            try pa_expect_k(p, TK_LPAREN)
+            if pa_decl_start(p, p.cur) || (try pa_open_attr(p)) { n.a = try pa_declaration(p, false, null) }
+            else if !(try pa_accept_k(p, TK_SEMI)) { n.a = try pa_expression(p, 1); try pa_expect_k(p, TK_SEMI) }
+            if !(try pa_accept_k(p, TK_SEMI)) {
+                n.b = try pa_expression(p, 1)
+                try se_scalar(p, n.b)
+                try pa_expect_k(p, TK_SEMI)
+            }
+            if !(try pa_accept_k(p, TK_RPAREN)) { ast_set_c(p, n, try pa_expression(p, 1)); try pa_expect_k(p, TK_RPAREN) }
+            p.loops += 1
+            defer { p.loops -= 1 }
+            ast_set_d(p, n, try pa_substatement(p))
+            return n
+        }
+        if kw == KW_CASE || kw == KW_DEFAULT {
+            try pa_bump(p)
+            try pa_case(p, t, kw, n, in_block)
+            return n
+        }
+        if kw == KW_BREAK || kw == KW_CONTINUE {
+            try pa_bump(p)
+            if p.loops == 0 && (p.switches == null || kw == KW_CONTINUE) {
+                try pa_error(p, t.loc, c"jump statement outside an enclosing loop or switch")
+            }
+            try pa_expect_k(p, TK_SEMI)
+            return n
+        }
+        if kw == KW_GOTO {
+            try pa_bump(p)
+            if try pa_accept_k(p, TK_STAR) {
+                try pa_gnu(p, t)
+                dest handle[Ast] = try pa_expression(p, 1)
+                n.a = dest
+                if se_null(dest) { n.a = se_convert(p, ty_ptr(TY_VOID), dest) }
+                else if !ty_is_ptr(se_decay(dest.ty)) { try pa_error(p, t.loc, c"computed goto requires pointer type") }
+            } else {
+                label Token = try pa_take(p)
+                l handle[Label] = try pa_get_label(p, label)
+                pa_add_jump(p, l, label.loc)
+                n.value = zext[u64](l.name)
+                ast_set_extra(p, n, handle_addr(l))
+            }
+            try pa_expect_k(p, TK_SEMI)
+            return n
+        }
+        if kw == KW_RETURN {
+            try pa_bump(p)
+            fun handle[Symbol] = p.function
+            ret u32 = ty_node(ty_unqual(fun.ty)).elem
+            if p.cur.kind == TK_SEMI {
+                if !ty_is_void(ret) { try pa_error(p, t.loc, c"non-void function must return a value") }
+            } else {
+                value handle[Ast] = try pa_expression(p, 1)
+                n.a = value
+                if ty_is_void(ret) {
+                    if !ty_is_void(value.ty) || !pa_is_gnu(p) { try pa_error(p, t.loc, c"void function cannot return a value") }
+                } else {
+                    try se_conversion(p, ret, value)
+                    n.a = se_convert(p, ret, value)
+                }
+            }
+            try pa_expect_k(p, TK_SEMI)
+            return n
+        }
+    }
+    if t.kind == TK_IDENT && !pa_keyword(p, t) && (try pa_at2_k(p, TK_COLON)) {
+        try pa_bump(p)
+        try pa_bump(p)
+        l handle[Label] = try pa_get_label(p, t)
+        if l.defined { try pa_error(p, t.loc, c"duplicate label") }
+        l.defined = true
+        l.vm = p.vm
+        n.op = p.punct_syms[zext[usize](TK_COLON)]
+        n.value = zext[u64](l.name)
+        ast_set_extra(p, n, handle_addr(l))
+        if pa_kw(p, p.cur) == KW_ATTRIBUTE {
+            ast_set_attrs(p, n, pa_join_attrs(try pa_attributes(p), ast_attrs(n)))
+        }
+        if !in_block { n.a = try pa_label_tail(p) }
+        return n
+    }
+    n.op = 0
+    e handle[Ast] = try pa_expression(p, 1)
+    try se_require_value(p, e)
+    n.a = e
+    n.ty = e.ty
+    try pa_expect_k(p, TK_SEMI)
+    return n
+}
+
+fn pa_function(p handle[Parser], s handle[Symbol], fn_op handle[DeclOp]) handle[Ast] fails {
+    p.function = s
+    p.function_fenv = p.fenv_access
+    pa_enter(p)
+    // Re-bind parameters and any tags declared in the parameter list
+    formal handle[Param] = handle_from_addr(s.params)
+    while formal != null {
+        if formal.name != 0 && formal.decl != null {
+            pa_bind_ord(p, formal.name, formal.decl)
+        }
+        formal = formal.next
+    }
+    pt handle[ProtoTag] = fn_op.proto_tags
+    while pt != null {
+        pa_bind_tag(p, pt.name, pt.ty)
+        pt = pt.next
+    }
+    // Switch to per-function arena unless codegen retains bodies for TU-wide inlining
+    saved_arena handle[Arena] = p.cur_arena
+    if !p.retain_bodies { p.cur_arena = &p.fn_arena }
+    defer {
+        p.function = null
+        pa_leave(p)
+        map_free(&p.labels)
+        p.label_list.n = 0
+        p.jumps = null
+        p.cur_arena = saved_arena
+        if !p.retain_bodies {
+            pa_arena_reset(&p.fn_arena)
+            pa_arena_reset(&p.expr_arena)
+        }
+    }
+    ret u32 = ty_node(ty_unqual(s.ty)).elem
+    if !ty_is_void(ret) && !se_complete(ret) { try pa_error(p, s.loc, c"function returns incomplete type") }
+    formal = handle_from_addr(s.params)
+    while formal != null {
+        if !se_complete(formal.ty) { try pa_error(p, formal.loc, c"parameter has incomplete type") }
+        formal = formal.next
+    }
+    body handle[Ast] = try pa_block(p, false, false)
+    for i usize in 0..p.label_list.n {
+        l handle[Label] = handle_from_addr(p.label_list.p[addr, i])
+        if l.used && !l.defined { try pa_error(p, l.loc, c"use of undefined label") }
+    }
+    jump handle[Jump] = p.jumps
+    while jump != null {
+        target handle[Label] = jump.label
+        try pa_check_jump(p, jump.vm, target.vm, jump.loc)
+        jump = jump.next
+    }
+    n handle[Ast] = pa_node(p, ND_DECL, s.loc, s.ty)
+    n.flags = NF_DEFINITION | (if p.function_fenv { NF_FENV } else { 0 })
+    n.decl = s
+    n.a = body
+    if s.attrs != null { ast_set_attrs(p, n, s.attrs) }
+    if p.on_function != null { try call_addr[fails](p.on_function, handle_addr(p), handle_addr(n), p.user) }
+    return null
+}

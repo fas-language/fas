@@ -4,7 +4,6 @@
 // Every section is a (file, section) pair packed as file << 32 | section.
 
 const LAYOUT_BASE u64 = 0x400000
-const PAGE u64 = 4096
 const MAX_OUTPUT u64 = 536870912   // 512 MiB
 const MAX_IMAGE u64 = 1073741824   // 1 GiB
 
@@ -247,7 +246,7 @@ fn layout_class(wanted u64, flags u64, cursor u64) u64 fails {
         if !ld.lay_relro { break }
     }
     if sh.n == 0 { return cursor }
-    alignment u64 = PAGE
+    alignment u64 = ld.lay_page
     for i u64 in 0..sh.n { alignment = umax(alignment, pk_section(vec_get(sh, i)).alignment) }
     start u64 = try out_align(cursor, alignment)
     cursor = start
@@ -376,7 +375,7 @@ fn layout_class(wanted u64, flags u64, cursor u64) u64 fails {
 
 // Layout's end_relro: the RELRO segment ends at the next page boundary
 fn end_relro(start u64, cursor u64) u64 fails {
-    cursor = try out_align(cursor, PAGE)
+    cursor = try out_align(cursor, ld.lay_page)
     ld.relro_seg.flags = 4
     ld.relro_seg.offset = start
     ld.relro_seg.file_size = cursor - start
@@ -391,7 +390,7 @@ fn layout_make() void fails {
         l handle[Lx] = lx(f)
         l.place = heap_alloc_zeroed(zext[u64](obj(f).nsec) * sizeof[Place] + sizeof[Place])
     }
-    cursor u64 = PAGE
+    cursor u64 = ld.lay_page
     cursor = try layout_class(1, 5, cursor)
     cursor = try layout_class(0, 4, cursor)
     cursor = try layout_class(2, 6, cursor)

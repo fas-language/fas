@@ -1,5 +1,5 @@
-(* ET_REL combination keeps section contributions separate. No addresses are
-   assigned and no relocation expressions are evaluated at this stage. *)
+(* ET_REL combination merges same-named input sections (see [combine]). No
+   addresses are assigned and no relocation expressions are evaluated. *)
 module E = Elf_reader
 module B = Binary
 
@@ -64,6 +64,19 @@ let combine ?stats (resolved : Resolver.t) =
           end)
         o.sections)
     objects;
+  (* Input sections with the same name, type, entsize and flags other than
+     SHF_WRITE/SHF_EXECINSTR share one output section whose flags are the
+     union, as in GNU ld and lld -r: tools that look sections up by name
+     (objtool on vmlinux.o) need it, and the kernel mixes "a" assembly with
+     "aw" C sections of one name. Group members stay separate
+     (SHF_LINK_ORDER inputs are rejected earlier). [bases] is each input
+     section's offset in its output section; gaps in executable output
+     sections are filled with int3. *)
+  let bases =
+    Array.map (fun (o : E.t) -> Array.make (Array.length o.sections) 0) objects
+  in
+  let limit = E.max_file_size in
+  let merged = Hashtbl.create ~random:true 64 and contents = ref [] in
   Array.iteri
     (fun file (o : E.t) ->
       Array.iter
@@ -74,41 +87,107 @@ let combine ?stats (resolved : Resolver.t) =
             && s.name <> ".note.GNU-stack"
             && (file < resolved.input_count || o.path <> "<common>")
           then begin
-            let bytes =
-              if s.kind = 8 then Bytes.empty
-              else Bytes.of_string (String.sub o.data s.offset s.size)
+            let separate = s.flags land 0x200 <> 0 in
+            let key = (s.name, s.kind, s.flags land lnot 5, s.entsize) in
+            let output =
+              match if separate then None else Hashtbl.find_opt merged key with
+              | Some output -> output
+              | None ->
+                  let output = add { s with size = 0; alignment = 1 } Bytes.empty in
+                  if not separate then Hashtbl.add merged key output;
+                  contents := output :: !contents;
+                  output
             in
-            let output = add s bytes in
-            maps.(file).(s.index) <- output.header.index
+            let h = output.header in
+            let alignment = max 1 s.alignment in
+            let base = B.align ~context:"partial section layout" ~limit h.size alignment in
+            output.header <-
+              {
+                h with
+                size = B.add ~context:"partial section size" ~limit base s.size;
+                alignment = max h.alignment alignment;
+                flags = h.flags lor s.flags;
+              };
+            bases.(file).(s.index) <- base;
+            maps.(file).(s.index) <- h.index
           end)
         o.sections)
     objects;
-  let relocations = ref [] in
+  let by_index = Hashtbl.create 64 in
+  List.iter
+    (fun (output : section) ->
+      let h = output.header in
+      Hashtbl.add by_index h.index output;
+      if h.kind <> 8 then
+        output.bytes <- Bytes.make h.size (if h.flags land 4 <> 0 then '\xcc' else '\000'))
+    !contents;
+  Array.iteri
+    (fun file (o : E.t) ->
+      Array.iter
+        (fun (s : E.section) ->
+          let index = maps.(file).(s.index) in
+          if index <> 0 && s.kind <> 8 && List.mem s.kind [ 1; 7; 14; 15; 16 ] then
+            Bytes.blit_string o.data s.offset (Hashtbl.find by_index index).bytes
+              bases.(file).(s.index) s.size)
+        o.sections)
+    objects;
+  (* One output relocation section per output target, holding each input
+     relocation section's entries in input order; [relocations] records
+     where each input's entries start. *)
+  let relocations = ref [] and rela_outputs = Hashtbl.create 64 and rela_list = ref [] in
   Array.iteri
     (fun file (o : E.t) ->
       Array.iter
         (fun (s : E.section) ->
           if s.kind = 4 && kept.(file).(s.index) && maps.(file).(s.info) <> 0 then begin
-            let output = add s (Bytes.of_string (String.sub o.data s.offset s.size)) in
+            let target = maps.(file).(s.info) in
+            let output, buffer =
+              match Hashtbl.find_opt rela_outputs target with
+              | Some part -> part
+              | None ->
+                  let output = add { s with size = 0; info = target } Bytes.empty in
+                  let part = (output, Buffer.create s.size) in
+                  Hashtbl.add rela_outputs target part;
+                  rela_list := part :: !rela_list;
+                  part
+            in
+            let start = Buffer.length buffer in
+            Buffer.add_substring buffer o.data s.offset s.size;
+            output.header <-
+              {
+                output.header with
+                size = B.add ~context:"partial relocation size" ~limit start s.size;
+              };
             maps.(file).(s.index) <- output.header.index;
-            relocations := (file, s, output) :: !relocations
+            relocations := (file, s, output, start) :: !relocations
           end)
         o.sections)
     objects;
+  List.iter
+    (fun ((output : section), buffer) -> output.bytes <- Buffer.to_bytes buffer)
+    !rela_list;
   let symbol_maps =
     Array.map (fun (o : E.t) -> Array.make (Array.length o.symbols) 0) objects
   in
   let symbols = ref [] and count = ref 0 in
   let symbol (s : E.symbol) =
     incr count;
-    if !count >= 1_000_000 then Error.fail "partial link: too many output symbols";
+    if !count >= E.max_symbols then Error.fail "partial link: too many output symbols";
     symbols := s :: !symbols;
     !count
   in
   let remap_symbol file (s : E.symbol) =
     if s.section = 0 || s.section >= 0xff00 then s
-    else { s with section = maps.(file).(s.section) }
+    else
+      {
+        s with
+        section = maps.(file).(s.section);
+        value = Int64.add s.value (Int64.of_int bases.(file).(s.section));
+      }
   in
+  (* Input section symbols collapse into one per output section; relocations
+     against them get the input section's base added to their addend. *)
+  let section_symbols = Hashtbl.create 64 in
   Array.iteri
     (fun file (o : E.t) ->
       Array.iteri
@@ -116,7 +195,20 @@ let combine ?stats (resolved : Resolver.t) =
           if
             n <> 0 && s.binding = 0
             && (s.section >= 0xff00 || (s.section <> 0 && maps.(file).(s.section) <> 0))
-          then symbol_maps.(file).(n) <- symbol (remap_symbol file s))
+          then
+            symbol_maps.(file).(n) <-
+              (if s.kind = 3 && s.section < 0xff00 then begin
+                 let output = maps.(file).(s.section) in
+                 match Hashtbl.find_opt section_symbols output with
+                 | Some index -> index
+                 | None ->
+                     let index =
+                       symbol { (remap_symbol file s) with value = 0L }
+                     in
+                     Hashtbl.add section_symbols output index;
+                     index
+               end
+               else symbol (remap_symbol file s)))
         o.symbols)
     objects;
   let first_global = !count + 1 in
@@ -179,13 +271,23 @@ let combine ?stats (resolved : Resolver.t) =
         o.symbols)
     objects;
   List.iter
-    (fun (file, (original : E.section), output) ->
+    (fun (file, (original : E.section), output, start) ->
       let o = objects.(file) in
+      let shift = bases.(file).(original.info) in
       for n = 0 to (original.E.size / 24) - 1 do
-        let at = n * 24 in
-        let info = B.u64 o.data (original.offset + at + 8) in
+        let at = start + (n * 24) in
+        let source = original.offset + (n * 24) in
+        B.set output.bytes at 8
+          (Int64.add (B.u64 o.data source) (Int64.of_int shift));
+        let info = B.u64 o.data (source + 8) in
         let old = Int64.to_int (Int64.shift_right_logical info 32) in
         let mapped = symbol_maps.(file).(old) in
+        (let s = o.symbols.(old) in
+         if old <> 0 && mapped <> 0 && s.kind = 3 && s.section <> 0 && s.section < 0xff00
+         then
+           B.set output.bytes (at + 16) 8
+             (Int64.add (B.u64 o.data (source + 16))
+                (Int64.of_int bases.(file).(s.section))));
         if old <> 0 && mapped = 0 then begin
           if
             o.sections.(original.info).flags land 2 <> 0
@@ -199,8 +301,7 @@ let combine ?stats (resolved : Resolver.t) =
           (Int64.logor
              (Int64.shift_left (Int64.of_int mapped) 32)
              (Int64.logand info 0xffff_ffffL))
-      done;
-      output.header <- { output.header with info = maps.(file).(original.info) })
+      done)
     !relocations;
   List.iter
     (fun (file, (original : E.section), members, output) ->
@@ -301,8 +402,8 @@ let combine ?stats (resolved : Resolver.t) =
   in
   symtab.header <- { symtab.header with link = strtab.header.index };
   List.iter
-    (fun (_, _, s) -> s.header <- { s.header with link = symtab.header.index })
-    !relocations;
+    (fun ((s : section), _) -> s.header <- { s.header with link = symtab.header.index })
+    !rela_list;
   List.iter
     (fun (_, _, _, s) -> s.header <- { s.header with link = symtab.header.index })
     !groups;

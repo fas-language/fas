@@ -82,11 +82,11 @@ let cond_num = function
 
 (* A memory operand: [base + disp], [rip + symbol + disp], or
    [base + index * scale + disp] where the base may be absent and the
-   displacement may name a symbol (absolute, sign-extended 32 bits: the
-   executable is not position independent and lives below 2 GiB). *)
+   displacement may name an absolute, sign-extended 32-bit symbol. *)
 type mem =
   | Base of reg * int
   | Rip of string * int
+  | Abs of string * int
   | Sib of {
       base : reg option;
       index : reg;
@@ -114,6 +114,7 @@ type reloc =
           `mov r64, [rip + sym@GOTPCREL]` (see [load_got]); same "next byte"
           convention as [Rel32]. Position-independent objects reach symbols
           another module may define or interpose through it. *)
+  | Dtpoff32 of { offset : int; symbol : string; addend : int }
   | Tpoff32 of { offset : int; symbol : string; addend : int }
       (** R_X86_64_TPOFF32: the symbol's offset from the thread pointer
           (local-exec TLS), as a sign-extended imm32 (see [tls_offset]). *)
@@ -129,6 +130,20 @@ type reloc =
       (** An ELF relocation taken as is (R_X86_64_* [kind], addend
           unadjusted): code an external assembler made, spliced in by
           [raw] (inline asm, see Mir_emit). *)
+
+(* [r] moved [d] bytes further into its section *)
+let shift_reloc d = function
+  | Rel32 r -> Rel32 { r with offset = r.offset + d }
+  | Call32 r -> Call32 { r with offset = r.offset + d }
+  | Abs64 r -> Abs64 { r with offset = r.offset + d }
+  | Abs32s r -> Abs32s { r with offset = r.offset + d }
+  | Abs32 r -> Abs32 { r with offset = r.offset + d }
+  | Gotpcrel r -> Gotpcrel { r with offset = r.offset + d }
+  | Dtpoff32 r -> Dtpoff32 { r with offset = r.offset + d }
+  | Tpoff32 r -> Tpoff32 { r with offset = r.offset + d }
+  | Gottpoff r -> Gottpoff { r with offset = r.offset + d }
+  | Tlsgd r -> Tlsgd { r with offset = r.offset + d }
+  | Raw r -> Raw { r with offset = r.offset + d }
 
 type t = {
   code : Buffer.t;
@@ -249,6 +264,11 @@ let mem_operand a reg_field = function
          offset + 4. *)
       a.relocs <- Rel32 { offset = pos a; symbol; addend } :: a.relocs;
       int32 a 0
+  | Abs (symbol, addend) ->
+      modrm a 0 reg_field 4;
+      byte a 0x25; (* no base or index *)
+      a.relocs <- Abs32s { offset = pos a; symbol; addend } :: a.relocs;
+      int32 a 0
   | Sib { base; index; scale; disp; sym } -> (
       let i = reg_num index in
       if i = 4 then invalid_arg "x64: rsp as an index";
@@ -286,7 +306,7 @@ let mem_operand a reg_field = function
 
 let mem_b_bits = function
   | Base (base, _) | Sib { base = Some base; _ } -> reg_num base
-  | Rip _ | Sib { base = None; _ } -> 0
+  | Rip _ | Abs _ | Sib { base = None; _ } -> 0
 
 let mem_x_bits = function Sib { index; _ } -> reg_num index | _ -> 0
 
@@ -664,8 +684,8 @@ let fop_xm a ~double op (dst : xmm) mem =
 
 (* ucomisd/ucomiss x, y: flags as an unsigned compare of x with y; PF set
    when unordered (ZF and CF are then set too). *)
-let ucomi a ~double (x : xmm) (y : xmm) =
-  sse_rr a (if double then 0x66 else 0) 0x2e ~reg:x ~rm:y
+let ucomi ?(signaling = false) a ~double (x : xmm) (y : xmm) =
+  sse_rr a (if double then 0x66 else 0) (if signaling then 0x2f else 0x2e) ~reg:x ~rm:y
 
 (* cvtsi2sd/ss xmm, r64 *)
 let cvt_si2f a ~double (x : xmm) r =
@@ -825,6 +845,18 @@ let call_symbol a symbol =
 
 let call_r a r = ext_r a ~w:false [ 0xff ] 2 r
 
+(* jmp to a symbol resolved by the linker (a tail jump to a thunk) *)
+let jmp_symbol a symbol =
+  byte a 0xe9;
+  a.relocs <- Call32 { offset = pos a; symbol; addend = 0 } :: a.relocs;
+  int32 a 0
+
+let pause a = List.iter (byte a) [ 0xf3; 0x90 ]
+let lfence a = List.iter (byte a) [ 0x0f; 0xae; 0xe8 ]
+
+(* the CET indirect-branch target marker *)
+let endbr64 a = List.iter (byte a) [ 0xf3; 0x0f; 0x1e; 0xfa ]
+
 (* General-dynamic TLS, the exact 16 bytes of the psABI sequence, padded
    so a linker can rewrite it in place to initial- or local-exec:
      66 48 8d 3d <sym@tlsgd>         data16 lea sym@tlsgd(%rip), %rdi
@@ -899,7 +931,7 @@ let farithp a op =
 let fsqrt87 a = byte a 0xd9; byte a 0xfa
 
 (* fucomip st(0), st(1): ZF PF CF as ucomis sets them for st0 vs st1; pops st0 *)
-let fucomip a = byte a 0xdf; byte a 0xe9
+let fucomip ?(signaling = false) a = byte a 0xdf; byte a (if signaling then 0xf1 else 0xe9)
 
 (* Absolute 64-bit address of a symbol, as data inside code (unused for now)
    or via [mov r64, imm64] with a relocation. *)
