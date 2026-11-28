@@ -859,6 +859,36 @@ fn emit_mem_modrm_scaled(m handle[Operand], reg_field u8, trailing_imm u32, gotp
 
 // ---------- Top-level instruction dispatch ----------
 
+fn op_cache_sig(op handle[Operand]) u8 {
+    k u8 = op.kind
+    if k == OPK_REG {
+        rn u8 = reg_num(op.reg)
+        if rn >= 16 { return 0 }
+        rtag u8 = if rn <= 2 { rn } else { 3 }
+        ind u8 = if op.indirect { 128 } else { 0 }
+        return ind | (reg_class(op.reg) << 2) | rtag
+    }
+    if k == OPK_MEM {
+        if op.seg != 0 { return 0 }
+        ind u8 = if op.indirect { 1 } else { 0 }
+        abs_f u8 = if op.base == 0 && op.index == 0 { 2 } else { 0 }
+        return 0x40 | ind | abs_f
+    }
+    if k == OPK_BRANCH {
+        if op.indirect || op.seg != 0 { return 0 }
+        return 0x44
+    }
+    if k == OPK_IMM && op.is_const {
+        v i64 = op.const_val
+        if v == 1 { return 0x48 }
+        if v >= -128 && v <= 127 { return 0x49 }
+        if v >= 128 && v <= 255 { return 0x4a }
+        if (v >= 256 && v <= 32767) || (v >= -2147483648 && v <= -129) { return 0x4b }
+        return 0
+    }
+    return 0
+}
+
 fn as_encode_insn(mnem Bytes, ops addr, nops u8, prefix_lock bool, prefix_rep u8) void fails {
     midx u32 = mnem_find(mnem)
     if midx == AS_NONE {
@@ -881,6 +911,20 @@ fn as_encode_insn(mnem Bytes, ops addr, nops u8, prefix_lock bool, prefix_rep u8
         op handle[Operand] = handle_from_addr(ops + zext[u64](k) * sizeof[Operand])
         if op.opmask != 0 || op.zeroing || op.bcast { need_evex = true }
     }
+    dkey u64 = 0
+    if !ac.code32 && !need_evex && nops <= 2 {
+        s0 u8 = if nops >= 1 { op_cache_sig(handle_from_addr(ops)) } else { 1 }
+        s1 u8 = if nops == 2 { op_cache_sig(handle_from_addr(ops + sizeof[Operand])) } else { 1 }
+        if s0 != 0 && s1 != 0 {
+            dkey = (zext[u64](midx + 1) << 20) | (zext[u64](nops) << 16) | (zext[u64](s0) << 8) | zext[u64](s1)
+            dslot usize = (dkey * 0x9e3779b185ebca87) >> 54
+            dc MnemCacheSlot = ac.desc_cache[dslot]
+            if dc.key == dkey {
+                try encode_desc(&INSTR_TABLE[zext[u64](dc.midx)], ops, nops, prefix_lock, prefix_rep)
+                return
+            }
+        }
+    }
     me handle[MnemEntry] = &MNEM_TABLE[zext[u64](midx)]
     for i u32 in 0..zext[u32](me.count) {
         d handle[InstrDesc] = &INSTR_TABLE[zext[u64](me.start + i)]
@@ -897,6 +941,10 @@ fn as_encode_insn(mnem Bytes, ops addr, nops u8, prefix_lock bool, prefix_rep u8
             }
         }
         if ok {
+            if dkey != 0 {
+                dslot usize = (dkey * 0x9e3779b185ebca87) >> 54
+                ac.desc_cache[dslot] = {dkey, me.start + i, 0}
+            }
             try encode_desc(d, ops, nops, prefix_lock, prefix_rep)
             return
         }

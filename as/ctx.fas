@@ -367,6 +367,7 @@ struct As {
     // Mnemonic lookup cache (1024-entry direct-mapped cache for <= 8-byte mnemonics)
     mnem_map StrU32Map
     mnem_cache arr[1024, MnemCacheSlot]
+    desc_cache arr[1024, MnemCacheSlot]
 
     // Preprocessor: include/macro/repeat source stack & conditionals
     src_stack Vec[SourceFrame]
