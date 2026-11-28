@@ -25,6 +25,7 @@ fn read_stdin(out handle[Buf]) void fails {
 }
 
 fn main(argc i32, argv addr) i32 {
+    heap_single_threaded = true
     os_init(argc, argv)
     out_path Bytes = bytes_c(c"a.out")
     in_path Bytes = bytes_empty()
@@ -87,25 +88,64 @@ fn main(argc i32, argv addr) i32 {
     }
 
     src_buf Buf = {}
+    src_bytes Bytes = bytes_empty()
+    mapped_src addr = null
+    mapped_sz usize = 0
     fname Bytes = bytes_c(c"<stdin>")
     if !has_input || bytes_is(in_path, c"-") {
         read_stdin(&src_buf) catch {
             os_write_all(STDERR, c"fas-as: error: failed to read stdin\n", 36) catch {}
             return 1
         }
+        src_bytes = buf_bytes(&src_buf)
     } else {
         fname = in_path
-        file_read(in_path.p, 256 * 1024 * 1024, &src_buf) catch {
+        fd i32 = os_open(in_path.p, O_RDONLY, 0) catch {
             os_write_all(STDERR, c"fas-as: error: cannot read input file: ", 39) catch {}
             os_write_all(STDERR, in_path.p, in_path.n) catch {}
             os_write_all(STDERR, c"\n", 1) catch {}
             return 1
         }
+        st Stat = {}
+        os_fstat(fd, &st) catch {
+            os_close(fd)
+            os_write_all(STDERR, c"fas-as: error: cannot read input file: ", 39) catch {}
+            os_write_all(STDERR, in_path.p, in_path.n) catch {}
+            os_write_all(STDERR, c"\n", 1) catch {}
+            return 1
+        }
+        if (st.mode & S_IFMT) == S_IFREG && st.size > 0 {
+            sz usize = bitcast[usize](st.size)
+            p addr = os_mmap(null, sz, PROT_READ, MAP_PRIVATE, fd, 0) catch null
+            os_close(fd)
+            if p != null {
+                mapped_src = p
+                mapped_sz = sz
+                src_bytes = bytes(p, sz)
+            } else {
+                file_read(in_path.p, 256 * 1024 * 1024, &src_buf) catch { return 1 }
+                src_bytes = buf_bytes(&src_buf)
+            }
+        } else {
+            os_close(fd)
+            if (st.mode & S_IFMT) != S_IFREG {
+                file_read(in_path.p, 256 * 1024 * 1024, &src_buf) catch {
+                    os_write_all(STDERR, c"fas-as: error: cannot read input file: ", 39) catch {}
+                    os_write_all(STDERR, in_path.p, in_path.n) catch {}
+                    os_write_all(STDERR, c"\n", 1) catch {}
+                    return 1
+                }
+                src_bytes = buf_bytes(&src_buf)
+            }
+        }
     }
 
     res AsResult = {}
-    defer { as_result_free(&res) }
-    ok bool = as_assemble_with_options(buf_bytes(&src_buf), fname, &inc_dirs, opts, &res)
+    defer {
+        as_result_free(&res)
+        if mapped_src != null { os_munmap(mapped_src, mapped_sz) }
+    }
+    ok bool = as_assemble_with_options(src_bytes, fname, &inc_dirs, opts, &res)
     if !ok {
         if res.diag.n != 0 {
             os_write_all(STDERR, res.diag.p, res.diag.n) catch {}
@@ -114,9 +154,15 @@ fn main(argc i32, argv addr) i32 {
     }
 
     if bytes_is(out_path, c"/dev/null") { return 0 }
-    file_write_atomic(out_path.p, bytes(res.obj_data, res.obj_size), 0o644) catch {
+    out_fd i32 = os_open(out_path.p, O_WRONLY | O_CREAT | O_TRUNC, 0o644) catch {
         os_write_all(STDERR, c"fas-as: error: failed to write output file\n", 43) catch {}
         return 1
     }
+    os_write_all(out_fd, res.obj_data, res.obj_size) catch {
+        os_close(out_fd)
+        os_write_all(STDERR, c"fas-as: error: failed to write output file\n", 43) catch {}
+        return 1
+    }
+    os_close(out_fd)
     return 0
 }

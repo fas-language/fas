@@ -33,6 +33,9 @@ fn sec_get_or_create(name Bytes, sh_type u32, sh_flags u64, sh_entsize u64, grou
     if existing == AS_NONE {
         map_put(&ac.sec_map, sname, id)
     }
+    if ac.sections.n > zext[u64](ac.cur_sec) {
+        ac.cur_sec_ptr = sec_at(ac.cur_sec)
+    }
     return id
 }
 
@@ -40,6 +43,8 @@ fn sec_switch(id u32) void {
     if ac.cur_sec != id {
         ac.prev_sec = ac.cur_sec
         ac.cur_sec = id
+        ac.cur_sec_ptr = sec_at(id)
+        ac.cur_frag = null
     }
 }
 
@@ -49,6 +54,8 @@ fn sec_push(id u32) void {
     e.prev_sec_id = ac.prev_sec
     ac.prev_sec = ac.cur_sec
     ac.cur_sec = id
+    ac.cur_sec_ptr = sec_at(id)
+    ac.cur_frag = null
 }
 
 fn sec_pop() void fails {
@@ -56,30 +63,47 @@ fn sec_pop() void fails {
     e SecStackEntry = vec_pop(&ac.sec_stack)
     ac.cur_sec = e.sec_id
     ac.prev_sec = e.prev_sec_id
+    ac.cur_sec_ptr = sec_at(ac.cur_sec)
+    ac.cur_frag = null
 }
 
 fn sec_previous() void {
     tmp u32 = ac.cur_sec
     ac.cur_sec = ac.prev_sec
     ac.prev_sec = tmp
+    ac.cur_sec_ptr = sec_at(ac.cur_sec)
+    ac.cur_frag = null
 }
 
 fn as_init_sections() void {
     // Default .text section (index 0)
     t u32 = sec_get_or_create(bytes_c(c".text"), SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR, 0, bytes_empty(), false)
-    sec_at(t).sh_align = 4
+    s handle[Section] = sec_at(t)
+    s.sh_align = 4
+    if ac.src.n > 16384 {
+        est u64 = ac.src.n / 8
+        if est > 4194304 { est = 4194304 }
+        buf_reserve(&s.data, est)
+        vec_reserve(&ac.syms, ac.src.n / 128)
+        vec_reserve(&ac.exprs, ac.src.n / 128)
+    }
     ac.cur_sec = t
     ac.prev_sec = t
+    ac.cur_sec_ptr = s
+    ac.cur_frag = null
 }
 
 // ---------- Fragment construction ----------
 
 fn frag_ensure_data() u32 {
-    s handle[Section] = cur_sec()
+    s handle[Section] = ac.cur_sec_ptr
     if s.frags.n != 0 {
         last u32 = trunc[u32](s.frags.n - 1)
         f handle[Frag] = vec_at(&s.frags, zext[u64](last))
-        if f.kind == FK_DATA { return last }
+        if f.kind == FK_DATA {
+            ac.cur_frag = f
+            return last
+        }
     }
     id u32 = trunc[u32](s.frags.n)
     f handle[Frag] = vec_add(&s.frags)
@@ -88,39 +112,74 @@ fn frag_ensure_data() u32 {
     f.data_len = 0
     f.expr = AS_NONE
     f.line = ac.line
+    ac.cur_frag = f
     return id
 }
 
 fn as_current_dot() u32 {
     fid u32 = frag_ensure_data()
-    s handle[Section] = cur_sec()
+    s handle[Section] = ac.cur_sec_ptr
     f handle[Frag] = vec_at(&s.frags, zext[u64](fid))
     return expr_dot(ac.cur_sec, fid, f.data_len)
 }
 
-fn emit_u8(v u8) void {
+fn emit_u8_slow(v u8) void {
     fid u32 = frag_ensure_data()
-    s handle[Section] = cur_sec()
+    s handle[Section] = ac.cur_sec_ptr
     f handle[Frag] = vec_at(&s.frags, zext[u64](fid))
     buf_u8(&s.data, v)
     f.data_len += 1
 }
 
+fn emit_u8(v u8) void {
+    f handle[Frag] = ac.cur_frag
+    s handle[Section] = ac.cur_sec_ptr
+    if f != null && s.data.n < s.data.cap {
+        s.data.p[u8, s.data.n] = v
+        s.data.n += 1
+        f.data_len += 1
+        return
+    }
+    emit_u8_slow(v)
+}
+
 fn emit_u16(v u16) void {
-    emit_u8(trunc[u8](v & 0xff))
-    emit_u8(trunc[u8]((v >> 8) & 0xff))
+    f handle[Frag] = ac.cur_frag
+    s handle[Section] = ac.cur_sec_ptr
+    if f == null {
+        _ u32 = frag_ensure_data()
+        f = ac.cur_frag
+    }
+    if s.data.n + 2 > s.data.cap { buf_reserve(&s.data, 2) }
+    (s.data.p + s.data.n)[u16] = v
+    s.data.n += 2
+    f.data_len += 2
 }
 
 fn emit_u32(v u32) void {
-    emit_u8(trunc[u8](v & 0xff))
-    emit_u8(trunc[u8]((v >> 8) & 0xff))
-    emit_u8(trunc[u8]((v >> 16) & 0xff))
-    emit_u8(trunc[u8]((v >> 24) & 0xff))
+    f handle[Frag] = ac.cur_frag
+    s handle[Section] = ac.cur_sec_ptr
+    if f == null {
+        _ u32 = frag_ensure_data()
+        f = ac.cur_frag
+    }
+    if s.data.n + 4 > s.data.cap { buf_reserve(&s.data, 4) }
+    (s.data.p + s.data.n)[u32] = v
+    s.data.n += 4
+    f.data_len += 4
 }
 
 fn emit_u64(v u64) void {
-    emit_u32(trunc[u32](v & 0xffffffff))
-    emit_u32(trunc[u32]((v >> 32) & 0xffffffff))
+    f handle[Frag] = ac.cur_frag
+    s handle[Section] = ac.cur_sec_ptr
+    if f == null {
+        _ u32 = frag_ensure_data()
+        f = ac.cur_frag
+    }
+    if s.data.n + 8 > s.data.cap { buf_reserve(&s.data, 8) }
+    (s.data.p + s.data.n)[u64] = v
+    s.data.n += 8
+    f.data_len += 8
 }
 
 fn emit_bytes(b Bytes) void {
@@ -146,7 +205,8 @@ fn emit_fixup(fid u32, foff u32, size u8, kind u8, is_signed u8, next_off u32, e
 }
 
 fn emit_relax_jmp(short_op u8, long_op u8, is_jcc bool, expr u32) void {
-    s handle[Section] = cur_sec()
+    s handle[Section] = ac.cur_sec_ptr
+    ac.cur_frag = null
     f handle[Frag] = vec_add(&s.frags)
     f.kind = FK_RELAX_JMP
     f.branch_pc32 = ac.code32
@@ -158,8 +218,9 @@ fn emit_relax_jmp(short_op u8, long_op u8, is_jcc bool, expr u32) void {
 
 fn emit_align(align u32, fill u8, has_fill bool, max_skip u32) void {
     if align <= 1 { return }
-    s handle[Section] = cur_sec()
+    s handle[Section] = ac.cur_sec_ptr
     if zext[u64](align) > s.sh_align { s.sh_align = zext[u64](align) }
+    ac.cur_frag = null
     f handle[Frag] = vec_add(&s.frags)
     f.kind = FK_ALIGN
     f.data_len = align
@@ -174,7 +235,8 @@ fn emit_align(align u32, fill u8, has_fill bool, max_skip u32) void {
 }
 
 fn emit_fill(count_expr u32, elem_size u32, fill_val u64) void {
-    s handle[Section] = cur_sec()
+    s handle[Section] = ac.cur_sec_ptr
+    ac.cur_frag = null
     f handle[Frag] = vec_add(&s.frags)
     f.kind = FK_FILL
     f.data_len = elem_size
@@ -184,7 +246,8 @@ fn emit_fill(count_expr u32, elem_size u32, fill_val u64) void {
 }
 
 fn emit_leb(expr u32, is_signed bool) void {
-    s handle[Section] = cur_sec()
+    s handle[Section] = ac.cur_sec_ptr
+    ac.cur_frag = null
     f handle[Frag] = vec_add(&s.frags)
     f.kind = if is_signed { FK_SLEB } else { FK_ULEB }
     f.expr = expr

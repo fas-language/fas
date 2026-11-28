@@ -74,18 +74,21 @@ fn as_assemble_with_options(src Bytes, filename Bytes, inc_dirs handle[Vec[Bytes
     ok bool = true
     as_run_pipeline(src, filename, inc_dirs, opts, false) catch { ok = false }
 
-    elf Buf = {}
-    if ok {
-        as_emit_elf(&elf)
-    }
-
-    // Copy outputs & diagnostics outside the link's region so they survive region_dispose
+    // Switch back to caller's region before emitting ELF so `elf.p` can be
+    // transferred directly to `out.obj_data` with zero extra copy when prev_reg == null.
     region_switch(prev_reg)
     if ok {
+        elf Buf = {}
+        as_emit_elf(&elf)
         out.ok = true
         if elf.n != 0 {
-            out.obj_data = heap_alloc_plain(elf.n)
-            mem_copy(out.obj_data, elf.p, elf.n)
+            if prev_reg == null {
+                out.obj_data = elf.p
+            } else {
+                out.obj_data = heap_alloc_plain(elf.n)
+                mem_copy(out.obj_data, elf.p, elf.n)
+                buf_free(&elf)
+            }
         }
         out.obj_size = elf.n
     } else {
