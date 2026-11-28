@@ -63,8 +63,72 @@ fn parse_ident() Bytes fails {
     }
     if !is_ident_start(p[u8, ac.pos]) { try as_err(c"expected identifier") }
     start u64 = ac.pos
-    while ac.pos < n && is_ident_char(p[u8, ac.pos]) { ac.pos += 1 }
-    return bytes(p + start, ac.pos - start)
+    pos u64 = start + 1
+    while pos < n && (AS_CC[zext[usize](p[u8, pos])] & AS_ID_CHAR) != 0 { pos += 1 }
+    ac.pos = pos
+    return bytes(p + start, pos - start)
+}
+
+fn parse_reg_after_pct() u16 fails {
+    p addr = ac.src.p
+    n u64 = ac.src.n
+    pos u64 = ac.pos + 1
+    // Ultra-fast path for lowercase 3-char GP64/GP32/RIP registers (90%+ of all operands!)
+    if pos + 3 <= n {
+        c0 u8 = p[u8, pos]
+        if c0 == 114 || c0 == 101 { // 'r' or 'e'
+            if pos + 3 == n || ((AS_CC[zext[usize](p[u8, pos + 3])] & AS_ID_CHAR) == 0 && p[u8, pos + 3] != 40) {
+                c1 u8 = p[u8, pos + 1]
+                c2 u8 = p[u8, pos + 2]
+                cls u8 = if c0 == 114 { RC_GP64 } else { RC_GP32 }
+                if c2 == 120 { // *ax, *cx, *dx, *bx
+                    if c1 == 97 { ac.pos = pos + 3; return reg_make(cls, 0) }
+                    if c1 == 99 { ac.pos = pos + 3; return reg_make(cls, 1) }
+                    if c1 == 100 { ac.pos = pos + 3; return reg_make(cls, 2) }
+                    if c1 == 98 { ac.pos = pos + 3; return reg_make(cls, 3) }
+                } else if c2 == 112 { // *sp, *bp, *ip
+                    if c1 == 115 { ac.pos = pos + 3; return reg_make(cls, 4) }
+                    if c1 == 98 { ac.pos = pos + 3; return reg_make(cls, 5) }
+                    if c1 == 105 { ac.pos = pos + 3; return reg_make(RC_RIP, if c0 == 114 { 0 } else { 1 }) }
+                } else if c2 == 105 { // *si, *di
+                    if c1 == 115 { ac.pos = pos + 3; return reg_make(cls, 6) }
+                    if c1 == 100 { ac.pos = pos + 3; return reg_make(cls, 7) }
+                } else if c0 == 114 && c1 == 49 && c2 >= 48 && c2 <= 53 { // r10..r15
+                    ac.pos = pos + 3
+                    return reg_make(RC_GP64, 10 + (c2 - 48))
+                }
+            }
+        }
+    }
+    while pos < n && (p[u8, pos] == 32 || p[u8, pos] == 9) { pos += 1 }
+    start u64 = pos
+    while pos < n {
+        c u8 = p[u8, pos]
+        if (AS_CC[zext[usize](c)] & AS_ID_CHAR) != 0 {
+            pos += 1
+            continue
+        }
+        // Stop at ')' only after matching st(N); don't consume ')' of memory operand!
+        if c == 40 {
+            if pos - start == 2 && ascii_lower(p[u8, start]) == 115 && ascii_lower(p[u8, start + 1]) == 116 {
+                pos += 1
+                continue
+            }
+            break
+        }
+        if c == 41 {
+            if pos - start == 4 && ascii_lower(p[u8, start]) == 115 && ascii_lower(p[u8, start + 1]) == 116 {
+                pos += 1
+            }
+            break
+        }
+        break
+    }
+    ac.pos = pos
+    rname Bytes = bytes(p + start, pos - start)
+    r u16 = reg_parse(rname)
+    if r == 0 { try as_err_b(c"unknown register: %", rname) }
+    return r
 }
 
 fn parse_reg_token() u16 fails {
@@ -72,34 +136,7 @@ fn parse_reg_token() u16 fails {
     if ac.pos >= ac.src.n || ac.src.p[u8, ac.pos] != 37 {
         try as_err(c"expected '%' before register")
     }
-    ac.pos += 1
-    skip_hspace()
-    p addr = ac.src.p
-    n u64 = ac.src.n
-    start u64 = ac.pos
-    while ac.pos < n && (is_ident_char(p[u8, ac.pos]) || p[u8, ac.pos] == 40 || p[u8, ac.pos] == 41) {
-        c u8 = p[u8, ac.pos]
-        // Stop at ')' only after matching st(N); don't consume ')' of memory operand!
-        if c == 40 {
-            // Only allow '(' inside st(0)..st(7)
-            if ac.pos - start == 2 && ascii_lower(p[u8, start]) == 115 && ascii_lower(p[u8, start + 1]) == 116 {
-                ac.pos += 1
-                continue
-            }
-            break
-        }
-        if c == 41 {
-            if ac.pos - start == 4 && ascii_lower(p[u8, start]) == 115 && ascii_lower(p[u8, start + 1]) == 116 {
-                ac.pos += 1
-            }
-            break
-        }
-        ac.pos += 1
-    }
-    rname Bytes = bytes(p + start, ac.pos - start)
-    r u16 = reg_parse(rname)
-    if r == 0 { try as_err_b(c"unknown register: %", rname) }
-    return r
+    return try parse_reg_after_pct()
 }
 
 // An AT&T operand may use a .set alias in place of a percent register.
@@ -108,7 +145,7 @@ fn parse_optional_register() u16 fails {
     if ac.pos >= ac.src.n { return 0 }
     c u8 = ac.src.p[u8, ac.pos]
     if c == 37 { return try parse_reg_token() }
-    if !is_ident_start(c) { return 0 }
+    if !ac.has_equ || !is_ident_start(c) { return 0 }
     start u64 = ac.pos
     name Bytes = try parse_ident()
     sid u32 = map_get(&ac.sym_map, name) catch AS_NONE
@@ -157,8 +194,12 @@ fn parse_op_decorators(out handle[Operand]) void fails {
 
 // Parses a single AT&T instruction operand.
 fn parse_operand(out handle[Operand], is_branch_mnem bool) void fails {
-    mem_set(handle_addr(out), 0, sizeof[Operand])
+    op_addr addr = handle_addr(out)
+    op_addr[u64, 0] = 0
+    op_addr[u64, 1] = 0
+    op_addr[u64, 2] = 0
     out.expr = AS_NONE
+    out.const_val = 0
     skip_hspace()
     if ac.pos >= ac.src.n { try as_err(c"expected operand") }
     p addr = ac.src.p
@@ -175,23 +216,40 @@ fn parse_operand(out handle[Operand], is_branch_mnem bool) void fails {
     if ac.pos < n && p[u8, ac.pos] == 36 {
         ac.pos += 1
         out.kind = OPK_IMM
+        cv i64 = 0
+        if try_parse_fast_int(&cv) {
+            out.is_const = true
+            out.const_val = cv
+            return
+        }
         out.expr = try parse_expr()
         return
     }
 
     // Register or segment-prefixed memory operand: %reg or %seg:disp(base,idx,scale)
-    r u16 = try parse_optional_register()
+    r u16 = 0
+    if ac.pos < n && p[u8, ac.pos] == 37 {
+        r = try parse_reg_after_pct()
+    } else if ac.has_equ {
+        r = try parse_optional_register()
+    }
     if r != 0 {
-        skip_hspace()
-        if ac.pos < n && p[u8, ac.pos] == 58 { // ':' -> segment override
-            if reg_class(r) != RC_SEG { try as_err(c"expected segment register before ':'") }
-            ac.pos += 1
-            out.seg = reg_num(r) + 1
-            // Fall through to parse memory operand after %seg:
+        if ac.pos < n && p[u8, ac.pos] != 44 && p[u8, ac.pos] != 10 {
+            skip_hspace()
+            if ac.pos < n && p[u8, ac.pos] == 58 { // ':' -> segment override
+                if reg_class(r) != RC_SEG { try as_err(c"expected segment register before ':'") }
+                ac.pos += 1
+                out.seg = reg_num(r) + 1
+                // Fall through to parse memory operand after %seg:
+            } else {
+                out.kind = OPK_REG
+                out.reg = r
+                if ac.pos < n && p[u8, ac.pos] == 123 { try parse_op_decorators(out) }
+                return
+            }
         } else {
             out.kind = OPK_REG
             out.reg = r
-            try parse_op_decorators(out)
             return
         }
     }
@@ -214,8 +272,15 @@ fn parse_operand(out handle[Operand], is_branch_mnem bool) void fails {
         }
     }
     if ac.pos < n && !is_address_tuple {
-        out.expr = try parse_expr()
-        out.has_disp = true
+        cv i64 = 0
+        if !is_branch_mnem && try_parse_fast_int(&cv) {
+            out.is_const = true
+            out.const_val = cv
+            out.has_disp = true
+        } else {
+            out.expr = try parse_expr()
+            out.has_disp = true
+        }
         skip_hspace()
     }
 
@@ -224,12 +289,20 @@ fn parse_operand(out handle[Operand], is_branch_mnem bool) void fails {
         ac.pos += 1
         skip_hspace()
         out.kind = OPK_MEM
-        out.base = try parse_optional_register()
+        if ac.pos < n && p[u8, ac.pos] == 37 {
+            out.base = try parse_reg_after_pct()
+        } else if ac.has_equ {
+            out.base = try parse_optional_register()
+        }
         skip_hspace()
         if ac.pos < n && p[u8, ac.pos] == 44 { // ','
             ac.pos += 1
             skip_hspace()
-            out.index = try parse_optional_register()
+            if ac.pos < n && p[u8, ac.pos] == 37 {
+                out.index = try parse_reg_after_pct()
+            } else if ac.has_equ {
+                out.index = try parse_optional_register()
+            }
             if out.index != 0 {
                 out.scale = 1
                 skip_hspace()
@@ -248,7 +321,9 @@ fn parse_operand(out handle[Operand], is_branch_mnem bool) void fails {
             try as_err(c"expected ')' in memory operand")
         }
         ac.pos += 1
-        try parse_op_decorators(out)
+        if ac.pos < n && p[u8, ac.pos] != 44 && p[u8, ac.pos] != 10 {
+            try parse_op_decorators(out)
+        }
         return
     }
 
@@ -257,7 +332,9 @@ fn parse_operand(out handle[Operand], is_branch_mnem bool) void fails {
         out.kind = OPK_BRANCH
     } else {
         out.kind = OPK_MEM
-        try parse_op_decorators(out)
+        if ac.pos < n && p[u8, ac.pos] != 44 && p[u8, ac.pos] != 10 {
+            try parse_op_decorators(out)
+        }
     }
 }
 
@@ -275,20 +352,28 @@ fn is_branch_mnemonic(m Bytes) bool {
 
 fn parse_data_directive(size u8) void fails {
     while true {
-        e u32 = try parse_expr()
-        ev EvalVal = {}
-        eval_expr(e, false, &ev)
-        if ev.kind == EV_CONST {
-            if size == 1 { emit_u8(trunc[u8](bitcast[u64](ev.val) & 0xff)) }
-            else if size == 2 { emit_u16(trunc[u16](bitcast[u64](ev.val) & 0xffff)) }
-            else if size == 4 { emit_u32(trunc[u32](bitcast[u64](ev.val) & 0xffffffff)) }
-            else { emit_u64(bitcast[u64](ev.val)) }
+        cv i64 = 0
+        if try_parse_fast_int(&cv) {
+            if size == 1 { emit_u8(trunc[u8](bitcast[u64](cv) & 0xff)) }
+            else if size == 2 { emit_u16(trunc[u16](bitcast[u64](cv) & 0xffff)) }
+            else if size == 4 { emit_u32(trunc[u32](bitcast[u64](cv) & 0xffffffff)) }
+            else { emit_u64(bitcast[u64](cv)) }
         } else {
-            fid u32 = frag_ensure_data()
-            f handle[Frag] = vec_at(&cur_sec().frags, zext[u64](fid))
-            foff u32 = f.data_len
-            for k u8 in 0..size { emit_u8(0) }
-            emit_fixup(fid, foff, size, FIX_ABS, 0, zext[u32](size), e)
+            e u32 = try parse_expr()
+            ev EvalVal = {}
+            eval_expr(e, false, &ev)
+            if ev.kind == EV_CONST {
+                if size == 1 { emit_u8(trunc[u8](bitcast[u64](ev.val) & 0xff)) }
+                else if size == 2 { emit_u16(trunc[u16](bitcast[u64](ev.val) & 0xffff)) }
+                else if size == 4 { emit_u32(trunc[u32](bitcast[u64](ev.val) & 0xffffffff)) }
+                else { emit_u64(bitcast[u64](ev.val)) }
+            } else {
+                fid u32 = frag_ensure_data()
+                f handle[Frag] = vec_at(&cur_sec().frags, zext[u64](fid))
+                foff u32 = f.data_len
+                for k u8 in 0..size { emit_u8(0) }
+                emit_fixup(fid, foff, size, FIX_ABS, 0, zext[u32](size), e)
+            }
         }
         skip_hspace()
         if ac.pos < ac.src.n && ac.src.p[u8, ac.pos] == 44 {
@@ -454,6 +539,29 @@ fn emit_base64(s Bytes) void fails {
 }
 
 fn parse_directive(dir Bytes) void fails {
+    // Fast-path hottest compiler-emitted directives first (.loc, .cfi_*, .byte/.long/.quad/.short, .p2align)
+    if dir.n >= 2 {
+        c1 u8 = dir.p[u8, 1]
+        if c1 == 108 { // .l*
+            if bytes_is(dir, c".loc") { skip_to_eol(); return }
+            if bytes_is(dir, c".long") { try parse_data_directive(4); return }
+        } else if c1 == 99 { // .c*
+            if dir.n >= 5 && dir.p[u8, 2] == 102 && dir.p[u8, 3] == 105 && dir.p[u8, 4] == 95 {
+                try parse_cfi_directive(dir)
+                return
+            }
+        } else if c1 == 98 { // .b*
+            if bytes_is(dir, c".byte") { try parse_data_directive(1); return }
+        } else if c1 == 113 { // .q*
+            if bytes_is(dir, c".quad") { try parse_data_directive(8); return }
+        } else if c1 == 112 { // .p*
+            if bytes_is(dir, c".p2align") { try parse_align_directive(true); return }
+        } else if c1 == 115 { // .s*
+            if bytes_is(dir, c".short") { try parse_data_directive(2); return }
+        } else if c1 == 102 { // .f*
+            if bytes_is(dir, c".file") { skip_to_eol(); return }
+        }
+    }
     if bytes_is(dir, c".code32") { ac.code32 = true; return }
     if bytes_is(dir, c".code64") { ac.code32 = false; return }
     if bytes_is(dir, c".text") {
@@ -561,6 +669,7 @@ fn parse_directive(dir Bytes) void fails {
         s.is_equ = true
         s.defined = true
         s.equ_expr = e
+        ac.has_equ = true
         return
     }
     if bytes_is(dir, c".byte") { try parse_data_directive(1); return }
@@ -679,11 +788,11 @@ fn parse_directive(dir Bytes) void fails {
         try parse_string_lit(&b)
         prev u32 = ac.cur_sec
         cid u32 = sec_get_or_create(bytes_c(c".comment"), SHT_PROGBITS, SHF_MERGE | SHF_STRINGS, 1, bytes_empty(), false)
-        ac.cur_sec = cid
+        ac.cur_sec = cid; ac.cur_sec_ptr = sec_at(cid); ac.cur_frag = null
         if cur_sec().data.n == 0 { emit_u8(0) }
         emit_bytes(buf_bytes(&b))
         emit_u8(0)
-        ac.cur_sec = prev
+        ac.cur_sec = prev; ac.cur_sec_ptr = sec_at(prev); ac.cur_frag = null
         return
     }
     if bytes_is(dir, c".base64") {
@@ -716,6 +825,7 @@ fn parse_directive(dir Bytes) void fails {
         }
         if bytes_is(dir, c".org") {
             s handle[Section] = cur_sec()
+            ac.cur_frag = null
             f handle[Frag] = vec_add(&s.frags)
             f.kind = FK_ORG
             f.expr = cnt
@@ -763,14 +873,14 @@ fn parse_directive(dir Bytes) void fails {
             // Place in .bss
             prev u32 = ac.cur_sec
             bss u32 = sec_get_or_create(bytes_c(c".bss"), SHT_NOBITS, SHF_ALLOC | SHF_WRITE, 0, bytes_empty(), false)
-            ac.cur_sec = bss
+            ac.cur_sec = bss; ac.cur_sec_ptr = sec_at(bss); ac.cur_frag = null
             if al > 1 { emit_align(trunc[u32](al), 0, false, 0) }
             try as_define_label(sym_get_or_create(name))
             s.binding = STB_LOCAL
             s.stype = STT_OBJECT
             s.size = sz
             emit_fill(expr_const(bitcast[i64](sz)), 1, 0)
-            ac.cur_sec = prev
+            ac.cur_sec = prev; ac.cur_sec_ptr = sec_at(prev); ac.cur_frag = null
         } else {
             s.is_common = true
             s.binding = STB_GLOBAL
@@ -806,24 +916,34 @@ fn parse_directive(dir Bytes) void fails {
 
 fn as_parse_all() void fails {
     while true {
-        skip_hspace()
-        if ac.pos >= ac.src.n {
+        p addr = ac.src.p
+        n u64 = ac.src.n
+        pos u64 = ac.pos
+        while pos < n {
+            ch u8 = p[u8, pos]
+            if ch == 32 || ch == 9 || ch == 13 { pos += 1 }
+            else if ch == 10 { pos += 1; ac.line += 1 }
+            else if ch == 59 { pos += 1 }
+            else { break }
+        }
+        ac.pos = pos
+        if pos < n && p[u8, pos] == 47 && pos + 1 < n && p[u8, pos + 1] == 42 {
+            skip_hspace()
+            pos = ac.pos
+        }
+        if pos >= n {
             if pop_source_frame() { continue }
             break
         }
-        p addr = ac.src.p
-        n u64 = ac.src.n
-        c u8 = p[u8, ac.pos]
-        if c == 10 { ac.pos += 1; ac.line += 1; continue }
-        if c == 59 { ac.pos += 1; continue }
-        if c == 35 || (c == 47 && ac.pos + 1 < n && p[u8, ac.pos + 1] == 47) {
+        c u8 = p[u8, pos]
+        if c == 35 || (c == 47 && pos + 1 < n && p[u8, pos + 1] == 47) {
             advance_statement()
             continue
         }
 
         // Numeric local label definition: digits followed by ':'
         if is_digit(c) {
-            start u64 = ac.pos
+            start u64 = pos
             j u64 = start
             while j < n && is_digit(p[u8, j]) { j += 1 }
             end u64 = j
@@ -843,10 +963,17 @@ fn as_parse_all() void fails {
         if !is_ident_start(c) {
             try as_err(c"unexpected character at start of statement")
         }
-        start u64 = ac.pos
-        while ac.pos < n && is_ident_char(p[u8, ac.pos]) { ac.pos += 1 }
-        tok Bytes = bytes(p + start, ac.pos - start)
-        skip_hspace()
+        start u64 = pos
+        pos = start + 1
+        while pos < n && (AS_CC[zext[usize](p[u8, pos])] & AS_ID_CHAR) != 0 { pos += 1 }
+        tok Bytes = bytes(p + start, pos - start)
+        // Fast inline hspace skip after leading token
+        while pos < n && (p[u8, pos] == 32 || p[u8, pos] == 9) { pos += 1 }
+        ac.pos = pos
+        if pos < n && (p[u8, pos] == 13 || (p[u8, pos] == 47 && pos + 1 < n && p[u8, pos + 1] == 42)) {
+            skip_hspace()
+            pos = ac.pos
+        }
 
         // Label: `name:`
         if ac.pos < n && p[u8, ac.pos] == 58 {
@@ -864,6 +991,7 @@ fn as_parse_all() void fails {
             s.is_equ = true
             s.defined = true
             s.equ_expr = e
+            ac.has_equ = true
             continue
         }
 
@@ -874,7 +1002,7 @@ fn as_parse_all() void fails {
         }
 
         // Macro invocation
-        if try try_invoke_macro(tok) {
+        if ac.macros.n != 0 && try try_invoke_macro(tok) {
             continue
         }
 
@@ -882,6 +1010,8 @@ fn as_parse_all() void fails {
         prefix_lock bool = false
         prefix_rep u8 = 0
         while true {
+            c0 u8 = tok.p[u8, 0]
+            if c0 != 108 && c0 != 114 && c0 != 110 { break }
             if bytes_is(tok, c"lock") {
                 prefix_lock = true
             } else if bytes_is(tok, c"rep") || bytes_is(tok, c"repe") || bytes_is(tok, c"repz") {
@@ -902,21 +1032,34 @@ fn as_parse_all() void fails {
                 break
             }
             start = ac.pos
-            while ac.pos < n && is_ident_char(p[u8, ac.pos]) { ac.pos += 1 }
-            tok = bytes(p + start, ac.pos - start)
+            pos = start
+            while pos < n && (AS_CC[zext[usize](p[u8, pos])] & AS_ID_CHAR) != 0 { pos += 1 }
+            ac.pos = pos
+            tok = bytes(p + start, pos - start)
             skip_hspace()
         }
         if tok.n == 0 { continue }
 
         // Parse 0..4 operands
-        ops arr[4, Operand] = {}
+        ops arr[4, Operand]
         nops u8 = 0
         is_br bool = is_branch_mnemonic(tok)
-        if !at_eol() {
+        has_ops bool = false
+        if ac.pos < n {
+            nc u8 = p[u8, ac.pos]
+            if nc != 10 && nc != 59 && nc != 35 {
+                has_ops = !(nc == 47 && ac.pos + 1 < n && p[u8, ac.pos + 1] == 47)
+            }
+        }
+        if has_ops {
             while true {
                 if nops >= 4 { try as_err(c"too many operands") }
                 try parse_operand(&ops[zext[u64](nops)], is_br)
                 nops += 1
+                if ac.pos < n && p[u8, ac.pos] == 44 {
+                    ac.pos += 1
+                    continue
+                }
                 skip_hspace()
                 if ac.pos < n && p[u8, ac.pos] == 44 {
                     ac.pos += 1

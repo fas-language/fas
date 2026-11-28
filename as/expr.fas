@@ -2,18 +2,37 @@
 // and constant/post-layout expression evaluator.
 
 // ---------- character classification ----------
+// Bit flags: 1=ident_start, 2=ident_char, 4=digit, 8=hex, 16=hspace
+const AS_ID_START u8 = 1
+const AS_ID_CHAR u8 = 2
+const AS_DIGIT u8 = 4
+const AS_HEX u8 = 8
+const AS_HSPACE u8 = 16
 
-fn is_ident_start(c u8) bool {
-    return (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c == 95 || c == 46 || c == 36
+const AS_CC arr[256, u8] = {
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 16, 0, 0, 0, 16, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    16, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0,
+    14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 0, 0, 0, 0, 0, 0,
+    2, 11, 11, 11, 11, 11, 11, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+    3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 0, 0, 0, 0, 3,
+    0, 11, 11, 11, 11, 11, 11, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+    3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 }
 
-fn is_ident_char(c u8) bool {
-    return is_ident_start(c) || (c >= 48 && c <= 57) || c == 64
-}
-
-fn is_digit(c u8) bool { return c >= 48 && c <= 57 }
-fn is_hex(c u8) bool { return is_digit(c) || (c >= 65 && c <= 70) || (c >= 97 && c <= 102) }
-fn is_hspace(c u8) bool { return c == 32 || c == 9 || c == 13 }
+fn is_ident_start(c u8) bool { return (AS_CC[zext[usize](c)] & AS_ID_START) != 0 }
+fn is_ident_char(c u8) bool { return (AS_CC[zext[usize](c)] & AS_ID_CHAR) != 0 }
+fn is_digit(c u8) bool { return (AS_CC[zext[usize](c)] & AS_DIGIT) != 0 }
+fn is_hex(c u8) bool { return (AS_CC[zext[usize](c)] & AS_HEX) != 0 }
+fn is_hspace(c u8) bool { return (AS_CC[zext[usize](c)] & AS_HSPACE) != 0 }
 
 fn hex_val(c u8) u64 {
     if c >= 48 && c <= 57 { return zext[u64](c - 48) }
@@ -22,40 +41,58 @@ fn hex_val(c u8) u64 {
 }
 
 fn skip_hspace() void {
-    while ac.pos < ac.src.n {
-        c u8 = ac.src.p[u8, ac.pos]
-        if is_hspace(c) {
-            ac.pos += 1
-        } else if c == 47 && ac.pos + 1 < ac.src.n && ac.src.p[u8, ac.pos + 1] == 42 {
+    p addr = ac.src.p
+    n u64 = ac.src.n
+    pos u64 = ac.pos
+    while pos < n {
+        c u8 = p[u8, pos]
+        if c == 32 || c == 9 || c == 13 {
+            pos += 1
+        } else if c == 47 && pos + 1 < n && p[u8, pos + 1] == 42 {
             // /* ... */ block comment
-            ac.pos += 2
-            while ac.pos + 1 < ac.src.n {
-                if ac.src.p[u8, ac.pos] == 10 { ac.line += 1 }
-                if ac.src.p[u8, ac.pos] == 42 && ac.src.p[u8, ac.pos + 1] == 47 {
-                    ac.pos += 2
+            pos += 2
+            while pos + 1 < n {
+                if p[u8, pos] == 10 { ac.line += 1 }
+                if p[u8, pos] == 42 && p[u8, pos + 1] == 47 {
+                    pos += 2
                     break
                 }
-                ac.pos += 1
+                pos += 1
             }
         } else {
             break
         }
     }
+    ac.pos = pos
 }
 
 fn at_eol() bool {
-    skip_hspace()
-    if ac.pos >= ac.src.n { return true }
-    c u8 = ac.src.p[u8, ac.pos]
-    return c == 10 || c == 59 || c == 35 || (c == 47 && ac.pos + 1 < ac.src.n && ac.src.p[u8, ac.pos + 1] == 47)
+    p addr = ac.src.p
+    n u64 = ac.src.n
+    pos u64 = ac.pos
+    while pos < n && (p[u8, pos] == 32 || p[u8, pos] == 9 || p[u8, pos] == 13) { pos += 1 }
+    if pos < n && p[u8, pos] == 47 && pos + 1 < n && p[u8, pos + 1] == 42 {
+        ac.pos = pos
+        skip_hspace()
+        pos = ac.pos
+    } else {
+        ac.pos = pos
+    }
+    if pos >= n { return true }
+    c u8 = p[u8, pos]
+    return c == 10 || c == 59 || c == 35 || (c == 47 && pos + 1 < n && p[u8, pos + 1] == 47)
 }
 
 fn skip_to_eol() void {
-    while ac.pos < ac.src.n {
-        c u8 = ac.src.p[u8, ac.pos]
-        if c == 10 || c == 59 { return }
-        ac.pos += 1
+    p addr = ac.src.p
+    n u64 = ac.src.n
+    pos u64 = ac.pos
+    while pos < n {
+        c u8 = p[u8, pos]
+        if c == 10 || c == 59 { break }
+        pos += 1
     }
+    ac.pos = pos
 }
 
 // ---------- symbol table helpers ----------
@@ -65,9 +102,11 @@ fn sym_get_or_create(name Bytes) u32 {
     if existing != AS_NONE { return existing }
     id u32 = trunc[u32](ac.syms.n)
     s handle[Symbol] = vec_add(&ac.syms)
-    // Copy name into interned arena so it has stable backing memory
-    iid u32 = intern(&ac.names, name)
-    sname Bytes = intern_name(&ac.names, iid)
+    // Copy name into current region so it has stable backing memory without double-hashing
+    np addr = heap_alloc(name.n + 1)
+    if name.n != 0 { mem_copy(np, name.p, name.n) }
+    np[u8, name.n] = 0
+    sname Bytes = bytes(np, name.n)
     s.name = sname
     s.binding = STB_LOCAL
     s.stype = STT_NOTYPE
@@ -430,7 +469,80 @@ fn parse_expr_cmp() u32 fails {
     return lhs
 }
 
+// Fast path for plain signed/unsigned decimal integer expressions (e.g. `-16(%rbp)`, `$0`, `.byte 42`).
+// Returns true and advances `ac.pos` only when the integer is immediately followed by an expression
+// terminator (`,`, `(`, `)`, `\n`, `;`, `#`, `{`, or EOF), never misfiring on `1f`/`1b` or `1+2`.
+fn try_parse_fast_int(out addr) bool {
+    p addr = ac.src.p
+    n u64 = ac.src.n
+    pos u64 = ac.pos
+    while pos < n && (p[u8, pos] == 32 || p[u8, pos] == 9) { pos += 1 }
+    if pos >= n { return false }
+    neg bool = false
+    c u8 = p[u8, pos]
+    if c == 45 { // '-'
+        neg = true
+        pos += 1
+        if pos >= n { return false }
+        c = p[u8, pos]
+    }
+    if c < 48 || c > 57 { return false }
+    // Defer 0x / 0b / octal 077 to full parser
+    if c == 48 && pos + 1 < n {
+        c1 u8 = p[u8, pos + 1]
+        if (AS_CC[zext[usize](c1)] & (AS_ID_CHAR | AS_DIGIT)) != 0 { return false }
+    }
+    v u64 = zext[u64](c - 48)
+    pos += 1
+    while pos < n {
+        d u8 = p[u8, pos]
+        if d < 48 || d > 57 { break }
+        v = v * 10 + zext[u64](d - 48)
+        pos += 1
+    }
+    // Reject if followed by ident char (e.g. `1f`/`1b` local label) or binary operator
+    end_pos u64 = pos
+    while pos < n && (p[u8, pos] == 32 || p[u8, pos] == 9) { pos += 1 }
+    if pos < n {
+        t u8 = p[u8, pos]
+        if t != 44 && t != 40 && t != 41 && t != 10 && t != 59 && t != 35 && t != 123 && t != 13 {
+            return false
+        }
+    }
+    ac.pos = end_pos
+    out[i64] = if neg { 0 - bitcast[i64](v) } else { bitcast[i64](v) }
+    return true
+}
+
 fn parse_expr() u32 fails {
+    cv i64 = 0
+    if try_parse_fast_int(&cv) { return expr_const(cv) }
+    // Fast path for bare symbol (e.g. `.L42`, `sqlite3_foo`, `sym(%rip)`)
+    p addr = ac.src.p
+    n u64 = ac.src.n
+    pos u64 = ac.pos
+    while pos < n && (p[u8, pos] == 32 || p[u8, pos] == 9) { pos += 1 }
+    if pos < n && (AS_CC[zext[usize](p[u8, pos])] & AS_ID_START) != 0 {
+        start u64 = pos
+        pos += 1
+        while pos < n {
+            ch u8 = p[u8, pos]
+            if (AS_CC[zext[usize](ch)] & AS_ID_CHAR) == 0 || ch == 64 { break }
+            pos += 1
+        }
+        slen u64 = pos - start
+        if !(slen == 1 && p[u8, start] == 46) && (pos >= n || p[u8, pos] != 64) {
+            end_pos u64 = pos
+            while pos < n && (p[u8, pos] == 32 || p[u8, pos] == 9) { pos += 1 }
+            if pos >= n || p[u8, pos] == 44 || p[u8, pos] == 40 || p[u8, pos] == 41 ||
+               p[u8, pos] == 10 || p[u8, pos] == 59 || p[u8, pos] == 35 || p[u8, pos] == 123 || p[u8, pos] == 13 {
+                ac.pos = end_pos
+                sid u32 = sym_get_or_create(bytes(p + start, slen))
+                sym_at(sid).referenced = true
+                return expr_sym(sid, VAR_NONE)
+            }
+        }
+    }
     lhs u32 = try parse_expr_cmp()
     while true {
         skip_hspace()

@@ -121,16 +121,30 @@ fn mnem_cmp_ci(query Bytes, off u32, ln u16) i32 {
 
 // Returns index into MNEM_TABLE, or AS_NONE if not found.
 fn mnem_find(name Bytes) u32 {
+    key u64 = 0
+    if name.n > 0 && name.n <= 8 {
+        for i u64 in 0..name.n {
+            key |= zext[u64](name.p[u8, i]) << (i * 8)
+        }
+        slot usize = (key * 0x9e3779b185ebca87) >> 54
+        mc MnemCacheSlot = ac.mnem_cache[slot]
+        if mc.key == key { return mc.midx }
+    }
     lo i64 = 0
     hi i64 = bitcast[i64](MNEM_COUNT) - 1
+    found u32 = AS_NONE
     while lo <= hi {
         mid i64 = lo + (hi - lo) / 2
         e handle[MnemEntry] = &MNEM_TABLE[bitcast[u64](mid)]
         c i32 = mnem_cmp_ci(name, e.name_off, e.name_len)
-        if c == 0 { return trunc[u32](bitcast[u64](mid)) }
+        if c == 0 { found = trunc[u32](bitcast[u64](mid)); break }
         if c < 0 { hi = mid - 1 } else { lo = mid + 1 }
     }
-    return AS_NONE
+    if key != 0 {
+        slot usize = (key * 0x9e3779b185ebca87) >> 54
+        ac.mnem_cache[slot] = {key, found, 0}
+    }
+    return found
 }
 
 // ---------- Operand matching ----------
@@ -157,16 +171,40 @@ fn fits_i8_for_flags(v i64, flags u32) bool {
 
 fn op_matches(ot u8, op handle[Operand], desc_flags u32) bool {
     k u8 = op.kind
+    // Hottest x86-64 operand types first
+    if ot == OT_RM64 { return (!op.indirect) && ((k == OPK_REG && reg_class(op.reg) == RC_GP64) || k == OPK_MEM) }
+    if ot == OT_R64 { return k == OPK_REG && !op.indirect && reg_class(op.reg) == RC_GP64 }
+    if ot == OT_RM32 { return (!op.indirect) && ((k == OPK_REG && reg_class(op.reg) == RC_GP32) || k == OPK_MEM) }
+    if ot == OT_R32 { return k == OPK_REG && !op.indirect && reg_class(op.reg) == RC_GP32 }
+    if ot == OT_M || ot == OT_M_ANY { return k == OPK_MEM && !op.indirect }
+    if ot == OT_RELAX || ot == OT_REL32 || ot == OT_REL8 {
+        return !op.indirect && (k == OPK_BRANCH || k == OPK_MEM) && op.base == 0 && op.index == 0 && op.seg == 0
+    }
+    if k == OPK_IMM {
+        if op.is_const {
+            v i64 = op.const_val
+            if ot == OT_IMM32S { return fits_i32(v) }
+            if ot == OT_IMM8S { return fits_i8_for_flags(v, desc_flags) }
+            if ot == OT_IMM32 || ot == OT_IMM64 || ot == OT_IMM16 { return true }
+            if ot == OT_IMM8 { return fits_u8_or_i8(v) }
+            if ot == OT_IMM1 { return v == 1 }
+            return false
+        }
+        ev EvalVal = {}
+        eval_immediate(op.expr, &ev)
+        if ot == OT_IMM1 { return ev.kind == EV_CONST && ev.val == 1 }
+        if ot == OT_IMM8 { return ev.kind == EV_CONST && fits_u8_or_i8(ev.val) }
+        if ot == OT_IMM8S { return ev.kind == EV_CONST && fits_i8_for_flags(ev.val, desc_flags) }
+        if ot == OT_IMM16 || ot == OT_IMM32 { return true }
+        if ot == OT_IMM32S { return ev.kind != EV_CONST || fits_i32(ev.val) }
+        if ot == OT_IMM64 { return true }
+        return false
+    }
     if ot == OT_NONE { return k == OPK_NONE }
     if ot == OT_R8 { return k == OPK_REG && !op.indirect && reg_is_gp8(op.reg) }
-    if ot == OT_R16 { return k == OPK_REG && !op.indirect && reg_class(op.reg) == RC_GP16 }
-    if ot == OT_R32 { return k == OPK_REG && !op.indirect && reg_class(op.reg) == RC_GP32 }
-    if ot == OT_R64 { return k == OPK_REG && !op.indirect && reg_class(op.reg) == RC_GP64 }
     if ot == OT_RM8 { return (!op.indirect) && ((k == OPK_REG && reg_is_gp8(op.reg)) || k == OPK_MEM) }
+    if ot == OT_R16 { return k == OPK_REG && !op.indirect && reg_class(op.reg) == RC_GP16 }
     if ot == OT_RM16 { return (!op.indirect) && ((k == OPK_REG && reg_class(op.reg) == RC_GP16) || k == OPK_MEM) }
-    if ot == OT_RM32 { return (!op.indirect) && ((k == OPK_REG && reg_class(op.reg) == RC_GP32) || k == OPK_MEM) }
-    if ot == OT_RM64 { return (!op.indirect) && ((k == OPK_REG && reg_class(op.reg) == RC_GP64) || k == OPK_MEM) }
-    if ot == OT_M || ot == OT_M_ANY { return k == OPK_MEM && !op.indirect }
     if ot == OT_IND_M { return k == OPK_MEM && op.indirect }
     if ot == OT_IND_RM64 { return op.indirect && ((k == OPK_REG && reg_class(op.reg) == RC_GP64) || k == OPK_MEM) }
     if ot == OT_IND_RM32 { return op.indirect && ((k == OPK_REG && reg_class(op.reg) == RC_GP32) || k == OPK_MEM) }
@@ -192,21 +230,6 @@ fn op_matches(ot u8, op handle[Operand], desc_flags u32) bool {
     if ot == OT_MM { return (!op.indirect) && ((k == OPK_REG && reg_class(op.reg) == RC_MMX) || k == OPK_MEM) }
     if ot == OT_CR { return k == OPK_REG && !op.indirect && reg_class(op.reg) == RC_CR }
     if ot == OT_DR { return k == OPK_REG && !op.indirect && reg_class(op.reg) == RC_DR }
-    if ot == OT_REL8 || ot == OT_REL32 || ot == OT_RELAX {
-        return !op.indirect && (k == OPK_BRANCH || k == OPK_MEM) && op.base == 0 && op.index == 0 && op.seg == 0
-    }
-    if k == OPK_IMM {
-        ev EvalVal = {}
-        eval_immediate(op.expr, &ev)
-        if ot == OT_IMM1 { return ev.kind == EV_CONST && ev.val == 1 }
-        if ot == OT_IMM8 { return ev.kind == EV_CONST && fits_u8_or_i8(ev.val) }
-        if ot == OT_IMM8S { return ev.kind == EV_CONST && fits_i8_for_flags(ev.val, desc_flags) }
-        // Full-width 16- and 32-bit operands keep the low bits. Sign-extending
-        // forms still have to represent the original value at operand width.
-        if ot == OT_IMM16 || ot == OT_IMM32 { return true }
-        if ot == OT_IMM32S { return ev.kind != EV_CONST || fits_i32(ev.val) }
-        if ot == OT_IMM64 { return true }
-    }
     return false
 }
 
@@ -294,8 +317,18 @@ fn encode_desc(d handle[InstrDesc], ops addr, nops u8, prefix_lock bool, prefix_
         emit_u8(d.opcode)
         selector handle[Operand] = handle_from_addr(ops)
         target handle[Operand] = handle_from_addr(ops + sizeof[Operand])
-        emit_insn_immediate(target.expr, trunc[u8](desc_imm_size(flags)), FIX_ABS)
-        emit_insn_immediate(selector.expr, 2, FIX_ABS)
+        tsz u8 = trunc[u8](desc_imm_size(flags))
+        if target.is_const {
+            tv u64 = bitcast[u64](target.const_val)
+            if tsz == 2 { emit_u16(trunc[u16](tv)) } else { emit_u32(trunc[u32](tv)) }
+        } else {
+            emit_insn_immediate(target.expr, tsz, FIX_ABS)
+        }
+        if selector.is_const {
+            emit_u16(trunc[u16](bitcast[u64](selector.const_val)))
+        } else {
+            emit_insn_immediate(selector.expr, 2, FIX_ABS)
+        }
         return
     }
 
@@ -400,6 +433,8 @@ fn encode_desc(d handle[InstrDesc], ops addr, nops u8, prefix_lock bool, prefix_
         if imm_sz != 0 {
             if imm_op == null {
                 emit_u8(d.ext)
+            } else if imm_op.is_const {
+                emit_u8(trunc[u8](bitcast[u64](imm_op.const_val) & 0xff))
             } else {
                 ev EvalVal = {}
                 eval_expr(imm_op.expr, false, &ev)
@@ -475,11 +510,16 @@ fn encode_desc(d handle[InstrDesc], ops addr, nops u8, prefix_lock bool, prefix_
                 opcode == 0xec || opcode == 0xed || opcode == 0xee || opcode == 0xef || opcode == 0xf4 ||
                 opcode == 0xf5 || opcode == 0xf6 || opcode == 0xfc || opcode == 0xfd || opcode == 0xfe
             if !comm && opcode == 0xc2 && imm_op != null {
-                evc EvalVal = {}
-                eval_expr(imm_op.expr, false, &evc)
-                if evc.kind == EV_CONST {
-                    pred u64 = bitcast[u64](evc.val) & 3
+                if imm_op.is_const {
+                    pred u64 = bitcast[u64](imm_op.const_val) & 3
                     if pred == 0 || pred == 3 { comm = true }
+                } else {
+                    evc EvalVal = {}
+                    eval_expr(imm_op.expr, false, &evc)
+                    if evc.kind == EV_CONST {
+                        pred u64 = bitcast[u64](evc.val) & 3
+                        if pred == 0 || pred == 3 { comm = true }
+                    }
                 }
             }
             if comm {
@@ -532,6 +572,8 @@ fn encode_desc(d handle[InstrDesc], ops addr, nops u8, prefix_lock bool, prefix_
         } else if imm_sz != 0 {
             if imm_op == null {
                 emit_u8(d.ext)
+            } else if imm_op.is_const {
+                emit_u8(trunc[u8](bitcast[u64](imm_op.const_val) & 0xff))
             } else {
                 ev EvalVal = {}
                 eval_expr(imm_op.expr, false, &ev)
@@ -588,11 +630,15 @@ fn encode_desc(d handle[InstrDesc], ops addr, nops u8, prefix_lock bool, prefix_
 
     if (d.ef2 & EF2_MOFFS32) != 0 {
         emit_u8(d.opcode)
-        fid u32 = frag_ensure_data()
-        f handle[Frag] = vec_at(&cur_sec().frags, zext[u64](fid))
-        foff u32 = f.data_len
-        emit_u32(0)
-        emit_fixup(fid, foff, 4, FIX_ABS, 0, 4, rm_op.expr)
+        if rm_op.is_const {
+            emit_u32(trunc[u32](bitcast[u64](rm_op.const_val) & 0xffffffff))
+        } else {
+            fid u32 = frag_ensure_data()
+            f handle[Frag] = vec_at(&cur_sec().frags, zext[u64](fid))
+            foff u32 = f.data_len
+            emit_u32(0)
+            emit_fixup(fid, foff, 4, FIX_ABS, 0, 4, rm_op.expr)
+        }
         return
     }
 
@@ -650,6 +696,12 @@ fn encode_desc(d handle[InstrDesc], ops addr, nops u8, prefix_lock bool, prefix_
     if imm_sz != 0 {
         if imm_op == null {
             emit_u8(d.ext)
+        } else if imm_op.is_const {
+            value u64 = bitcast[u64](imm_op.const_val)
+            if imm_sz == 1 { emit_u8(trunc[u8](value)) }
+            else if imm_sz == 2 { emit_u16(trunc[u16](value)) }
+            else if imm_sz == 4 { emit_u32(trunc[u32](value)) }
+            else { emit_u64(value) }
         } else {
             fkind u8 = if (flags & EF_IMM_32S) != 0 { FIX_IMM32S } else { FIX_ABS }
             emit_insn_immediate(imm_op.expr, trunc[u8](imm_sz), fkind)
@@ -677,6 +729,10 @@ fn emit_mem_modrm_scaled(m handle[Operand], reg_field u8, trailing_imm u32, gotp
     if base != 0 && reg_class(base) == RC_RIP {
         if index != 0 { try as_err(c"cannot use index register with %rip") }
         emit_u8((reg_field << 3) | 5)
+        if m.has_disp && m.is_const {
+            emit_u32(trunc[u32](bitcast[u64](m.const_val) & 0xffffffff))
+            return
+        }
         fid u32 = frag_ensure_data()
         f handle[Frag] = vec_at(&cur_sec().frags, zext[u64](fid))
         foff u32 = f.data_len
@@ -694,13 +750,17 @@ fn emit_mem_modrm_scaled(m handle[Operand], reg_field u8, trailing_imm u32, gotp
     // Evaluate displacement if present
     disp_is_const bool = true
     disp_val i64 = 0
-    if m.has_disp && m.expr != AS_NONE {
-        ev EvalVal = {}
-        eval_expr(m.expr, false, &ev)
-        if ev.kind == EV_CONST {
-            disp_val = ev.val
-        } else {
-            disp_is_const = false
+    if m.has_disp {
+        if m.is_const {
+            disp_val = m.const_val
+        } else if m.expr != AS_NONE {
+            ev EvalVal = {}
+            eval_expr(m.expr, false, &ev)
+            if ev.kind == EV_CONST {
+                disp_val = ev.val
+            } else {
+                disp_is_const = false
+            }
         }
     }
 
@@ -799,15 +859,44 @@ fn emit_mem_modrm_scaled(m handle[Operand], reg_field u8, trailing_imm u32, gotp
 
 // ---------- Top-level instruction dispatch ----------
 
+fn op_cache_sig(op handle[Operand]) u8 {
+    k u8 = op.kind
+    if k == OPK_REG {
+        rn u8 = reg_num(op.reg)
+        if rn >= 16 { return 0 }
+        rtag u8 = if rn <= 2 { rn } else { 3 }
+        ind u8 = if op.indirect { 128 } else { 0 }
+        return ind | (reg_class(op.reg) << 2) | rtag
+    }
+    if k == OPK_MEM {
+        if op.seg != 0 { return 0 }
+        ind u8 = if op.indirect { 1 } else { 0 }
+        abs_f u8 = if op.base == 0 && op.index == 0 { 2 } else { 0 }
+        return 0x40 | ind | abs_f
+    }
+    if k == OPK_BRANCH {
+        if op.indirect || op.seg != 0 { return 0 }
+        return 0x44
+    }
+    if k == OPK_IMM && op.is_const {
+        v i64 = op.const_val
+        if v == 1 { return 0x48 }
+        if v >= -128 && v <= 127 { return 0x49 }
+        if v >= 128 && v <= 255 { return 0x4a }
+        if (v >= 256 && v <= 32767) || (v >= -2147483648 && v <= -129) { return 0x4b }
+        return 0
+    }
+    return 0
+}
+
 fn as_encode_insn(mnem Bytes, ops addr, nops u8, prefix_lock bool, prefix_rep u8) void fails {
     midx u32 = mnem_find(mnem)
     if midx == AS_NONE {
         try as_err_b(c"unknown instruction: ", mnem)
     }
-    need_evex bool = false
-    for k u8 in 0..nops {
-        op handle[Operand] = handle_from_addr(ops + zext[u64](k) * sizeof[Operand])
-        if ac.code32 {
+    if ac.code32 {
+        for k u8 in 0..nops {
+            op handle[Operand] = handle_from_addr(ops + zext[u64](k) * sizeof[Operand])
             if op.kind == OPK_REG && (reg_class(op.reg) == RC_GP64 || reg_num(op.reg) >= 8 || reg_needs_rex(op.reg)) {
                 try as_err(c"register requires 64-bit code mode")
             }
@@ -816,7 +905,25 @@ fn as_encode_insn(mnem Bytes, ops addr, nops u8, prefix_lock bool, prefix_rep u8
                 try as_err(c"address requires 64-bit code mode")
             }
         }
+    }
+    need_evex bool = false
+    for k u8 in 0..nops {
+        op handle[Operand] = handle_from_addr(ops + zext[u64](k) * sizeof[Operand])
         if op.opmask != 0 || op.zeroing || op.bcast { need_evex = true }
+    }
+    dkey u64 = 0
+    if !ac.code32 && !need_evex && nops <= 2 {
+        s0 u8 = if nops >= 1 { op_cache_sig(handle_from_addr(ops)) } else { 1 }
+        s1 u8 = if nops == 2 { op_cache_sig(handle_from_addr(ops + sizeof[Operand])) } else { 1 }
+        if s0 != 0 && s1 != 0 {
+            dkey = (zext[u64](midx + 1) << 20) | (zext[u64](nops) << 16) | (zext[u64](s0) << 8) | zext[u64](s1)
+            dslot usize = (dkey * 0x9e3779b185ebca87) >> 54
+            dc MnemCacheSlot = ac.desc_cache[dslot]
+            if dc.key == dkey {
+                try encode_desc(&INSTR_TABLE[zext[u64](dc.midx)], ops, nops, prefix_lock, prefix_rep)
+                return
+            }
+        }
     }
     me handle[MnemEntry] = &MNEM_TABLE[zext[u64](midx)]
     for i u32 in 0..zext[u32](me.count) {
@@ -834,6 +941,10 @@ fn as_encode_insn(mnem Bytes, ops addr, nops u8, prefix_lock bool, prefix_rep u8
             }
         }
         if ok {
+            if dkey != 0 {
+                dslot usize = (dkey * 0x9e3779b185ebca87) >> 54
+                ac.desc_cache[dslot] = {dkey, me.start + i, 0}
+            }
             try encode_desc(d, ops, nops, prefix_lock, prefix_rep)
             return
         }
