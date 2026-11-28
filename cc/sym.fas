@@ -160,7 +160,7 @@ fn sym_eq_fast(a addr, b addr, n usize) bool {
 }
 
 fn sym_grow(st handle[SymTable]) void {
-    new_cap usize = if st.mask == 0 { 8192 } else { (st.mask + 1) * 2 }
+    new_cap usize = if st.mask == 0 { 4096 } else { (st.mask + 1) * 2 }
     new_mask usize = new_cap - 1
     new_slots addr = heap_alloc_zeroed(new_cap * sizeof[SymSlot])
     if st.slots != null {

@@ -536,12 +536,22 @@ fn cli_search_paths(p handle[Pp], o handle[Options]) void {
 }
 
 fn cli_definitions(p handle[Pp], source Bytes, filename addr) void fails {
-    b addr = heap_alloc_zeroed(source.n + 64)
-    if source.n != 0 { mem_copy(b, source.p, source.n) }
+    stack_b arr[2048, u8]
+    b addr
+    if source.n + 64 <= 2048 {
+        b = &stack_b[0]
+        if source.n != 0 { mem_copy(b, source.p, source.n) }
+        mem_set(b + source.n, 0, 64)
+    } else {
+        b = heap_alloc_zeroed(source.n + 64)
+        if source.n != 0 { mem_copy(b, source.p, source.n) }
+    }
     sf SourceFile = {}
     sf.raw_data = b
     sf.raw_len = source.n
-    sf_prepare(&sf, p.ctx.gnu)
+    sf.data = b
+    sf.len = trunc[u32](source.n)
+    sf.read = true
     inst_idx u32 = sm_alloc_inst(&p.ctx.sm, &sf, sym_intern_c(&p.ctx.syms, filename), 0)
     inst handle[SourceInst] = vec_at[SourceInst](&p.ctx.sm.insts, zext[usize](inst_idx))
     l Lexer = {}
@@ -551,12 +561,10 @@ fn cli_definitions(p handle[Pp], source Bytes, filename addr) void fails {
     l.base = inst.base
     l.inst_idx = inst_idx
     l.flags = F_BOL
-    tokens Vec[Token] = {}
-    defer { vec_free[Token](&tokens) }
     while l.at < l.n {
-        vec_clear[Token](&tokens)
-        try pp_lex_line(&p.ctx, &l, &tokens, false)
-        if tokens.n != 0 { try pp_define(p, &tokens, tokens.p[Token].loc, false) }
+        vec_clear[Token](&p.dir_args)
+        try pp_lex_line(&p.ctx, &l, &p.dir_args, false)
+        if p.dir_args.n != 0 { try pp_define(p, &p.dir_args, p.dir_args.p[Token].loc, false) }
     }
 }
 
@@ -901,10 +909,12 @@ fn cli_main(p handle[Pp], o handle[Options], argc usize) void fails {
         }
         pp_depend(p, p.base_file, false)
         out Output = {}
-        stream_stdout bool = !o.macro_dump && o.deps != 1 && (o.output == null || bytes_eq_c(bytes_c(o.output), c"-"))
+        stream_stdout bool = !o.syntax_only && !o.macro_dump && o.deps != 1 && (o.output == null || bytes_eq_c(bytes_c(o.output), c"-"))
         out.stream_fd = if stream_stdout { STDOUT } else { -1 }
-        if stream_stdout { buf_reserve(&out.text, 294912) }
-        else if main_input.raw_len > 4096 { buf_reserve(&out.text, main_input.raw_len) }
+        if !o.syntax_only {
+            if stream_stdout { buf_reserve(&out.text, 294912) }
+            else if main_input.raw_len > 4096 { buf_reserve(&out.text, main_input.raw_len) }
+        }
         for order u8 in 0..2 {
             for i usize in 0..o.force.n {
                 inc Command = o.force.p[Command, i]

@@ -666,6 +666,7 @@ fn pa_refill_buf(p handle[Parser]) void fails {
                     slots addr = syms.slots
                     sym_mask usize = syms.mask
                     bn u32 = 0
+                    frame_changed bool = false
                     while bn < 128 {
                         // Tight whitespace + newline skip (4 spaces/iter for indentation!)
                         while true {
@@ -942,6 +943,31 @@ fn pa_refill_buf(p handle[Parser]) void fails {
                         // 4. Other punctuators (excluding `#` at BOL and `.0` floats)
                         if (cls & B_PUNCT) != 0 {
                             if (flags & F_BOL) != 0 && (ch == 35 || (ch == 37 && start[u8, 1] == 58)) {
+                                if bn == 0 && ch == 35 {
+                                    frames_n usize = pp.frames.n
+                                    l.at = at + 1
+                                    l.flags = 0
+                                    try pp_directive(pp, frame, tok_make(TK_HASH, flags | sys_flag, 1, base + trunc[u32](at), 0))
+                                    slots = syms.slots
+                                    sym_mask = syms.mask
+                                    sflags_p = syms.flags.p
+                                    canon_p = syms.canon.p
+                                    if pp.frames.n != frames_n {
+                                        frame_changed = true
+                                        break
+                                    }
+                                    frame = vec_at[Frame](&pp.frames, frames_n - 1)
+                                    l = &frame.lexer
+                                    at = l.at
+                                    flags = l.flags
+                                    if pp.pending.at >= pp.pending.tokens.n &&
+                                        !pp.embedded.active && pp.stream.spans.n == 0 &&
+                                        (pp.conditions.n == 0 || pp.conditions.p[Cond, pp.conditions.n - 1].active) &&
+                                        !l.in_comment && !l.header {
+                                        continue
+                                    }
+                                    break
+                                }
                                 // Directive at BOL: stop batch cleanly before '#'
                                 break
                             }
@@ -1061,12 +1087,14 @@ fn pa_refill_buf(p handle[Parser]) void fails {
                         p.buf[zext[usize](bn)] = t
                         bn += 1
                     }
-                    l.at = at
-                    l.flags = flags
-                    if bn != 0 {
-                        if frame.guard_stage != 2 { frame.guard_stage = 4 }
-                        p.buf_n = bn
-                        return
+                    if !frame_changed {
+                        l.at = at
+                        l.flags = flags
+                        if bn != 0 {
+                            if frame.guard_stage != 2 { frame.guard_stage = 4 }
+                            p.buf_n = bn
+                            return
+                        }
                     }
                 }
             }
@@ -1431,16 +1459,17 @@ fn parse_tu(p handle[Parser], pp handle[Pp]) void fails {
     p.ctx = &pp.ctx
     p.x86_features = pp.x86_features
     p.cur_arena = &p.tu_arena
-    // Pre-warm 256 KB function arena, 32 KB L1 expr_arena, and PP scratch vecs
-    arena_alloc(&p.fn_arena, 262144, 16)
+    // Pre-warm compact function/expr arenas and PP scratch vecs (auto-grow on demand)
+    arena_alloc(&p.fn_arena, 65536, 16)
     pa_arena_reset(&p.fn_arena)
-    arena_alloc(&p.expr_arena, 32768, 16)
+    arena_alloc(&p.expr_arena, 16384, 16)
     pa_arena_reset(&p.expr_arena)
-    vec_reserve[Token](&pp.arg_data, 2048)
-    vec_reserve[Arg](&pp.arg_spans, 64)
-    vec_reserve[Token](&pp.subst_out, 2048)
-    vec_reserve[Token](&pp.cache_toks, 2048)
-    vec_reserve[Hide](&pp.hides, 4096)
+    vec_reserve[Token](&pp.dir_args, 64)
+    vec_reserve[Token](&pp.arg_data, 128)
+    vec_reserve[Arg](&pp.arg_spans, 32)
+    vec_reserve[Token](&pp.subst_out, 128)
+    vec_reserve[Token](&pp.cache_toks, 128)
+    vec_reserve[Hide](&pp.hides, 256)
     kw_fill_table(&pp.ctx.syms, &p.kw_table[0], pp.standard, pp.ctx.gnu)
     for k u8 in TK_PUNCT_FIRST..(TK_PUNCT_LAST + 1) {
         p.punct_syms[zext[usize](k)] = sym_intern_b(&pp.ctx.syms, punct_bytes(k))

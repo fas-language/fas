@@ -634,8 +634,23 @@ fn expand_cached(p handle[Pp], e handle[Expand], data handle[Vec[Token]], arg Ar
         cache.ready = true
         return
     }
+    // Copy argument tokens out of `p.arg_data` before calling `expand_list`:
+    // nested macro invocations inside `expand_list` push onto `p.arg_data` and
+    // may reallocate `data.p` while `expand_list` is still reading it.
+    n usize = zext[usize](arg.size)
+    stack_copy arr[16, Token]
+    src addr = &stack_copy[0]
+    heap_copy bool = false
+    if n > 16 {
+        src = heap_alloc_plain(n * sizeof[Token])
+        heap_copy = true
+    }
+    defer { if heap_copy { heap_free(src) } }
+    if n != 0 {
+        mem_copy(src, data.p + zext[usize](arg.start) * sizeof[Token], n * sizeof[Token])
+    }
     cache.start = p.cache_toks.n
-    try expand_list(p, data.p + zext[usize](arg.start) * sizeof[Token], zext[usize](arg.size), &p.cache_toks, e.expression)
+    try expand_list(p, src, n, &p.cache_toks, e.expression)
     cache.size = p.cache_toks.n - cache.start
     cache.ready = true
 }

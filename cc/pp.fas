@@ -27,6 +27,16 @@ struct PpRoot {
 }
 
 value struct SavedMacro { macro addr, id u32, flags u8 }
+value struct DevIno { dev u64, ino u64 }
+fn devino_hash(k DevIno) u64 { return hash_mix(k.dev ^ (k.ino * 0x9e3779b185ebca87)) }
+fn devino_eq(a DevIno, b DevIno) bool { return a.dev == b.dev && a.ino == b.ino }
+
+struct DirEntries {
+    missing bool
+    hashes Map[u64, u8, u64_hash, u64_eq]
+}
+
+const SYS_GETDENTS64 u64 = 217
 
 struct Pp {
     ctx CcCtx
@@ -44,8 +54,9 @@ struct Pp {
     root_at usize
     conditions Vec[Cond]
     dirs Vec[SearchDir]
-    inputs Map[Bytes, addr, bytes_hash, bytes_eq]
+    inputs Map[DevIno, addr, devino_hash, devino_eq]
     aliases Map[Bytes, addr, bytes_hash, bytes_eq]
+    dir_cache Map[u32, addr, u32_hash, u32_eq]
     visited Map[u32, usize, u32_hash, u32_eq]
     dependencies Vec[Dependency]
     hides Vec[Hide]
@@ -95,34 +106,115 @@ fn pp_macro_arena_reset(p handle[Pp]) void {
 
 error MissingInput
 
+fn pp_dir_might_have(p handle[Pp], dir_sym u32, file Bytes) bool {
+    if file.n == 0 || file.p[u8, 0] == 46 { return true }
+    // Extract top-level component before first '/'
+    comp_len usize = 0
+    while comp_len < file.n && file.p[u8, comp_len] != 47 { comp_len += 1 }
+    if comp_len == 0 { return true }
+    comp Bytes = bytes(file.p, comp_len)
+
+    de_addr addr = map_get(&p.dir_cache, dir_sym) catch {
+        dir_b Bytes = sym_name(&p.ctx.syms, dir_sym)
+        de handle[DirEntries] = handle_from_addr(heap_alloc_zeroed(sizeof[DirEntries]))
+        stack_p arr[512, u8]
+        cstr addr
+        dyn_p Buf = {}
+        defer { buf_free(&dyn_p) }
+        if dir_b.n < 512 {
+            mem_copy(&stack_p[0], dir_b.p, dir_b.n)
+            stack_p[dir_b.n] = 0
+            cstr = &stack_p[0]
+        } else {
+            buf_append(&dyn_p, dir_b)
+            cstr = buf_cstr(&dyn_p)
+        }
+        fd i32 = os_open(cstr, O_RDONLY | O_DIRECTORY, 0) catch {
+            de.missing = true
+            map_put(&p.dir_cache, dir_sym, handle_addr(de))
+            return false
+        }
+        defer { os_close(fd) }
+        dbuf arr[8192, u8]
+        while true {
+            nr i64 = syscall(SYS_GETDENTS64, fd, &dbuf[0], 8192)
+            if nr <= 0 { break }
+            off usize = 0
+            limit usize = bitcast[usize](nr)
+            while off < limit {
+                reclen usize = zext[usize]((&dbuf[0] + off + 16)[u16])
+                if reclen == 0 { break }
+                name_p addr = &dbuf[0] + off + 19
+                nlen usize = 0
+                while name_p[u8, nlen] != 0 { nlen += 1 }
+                if nlen != 0 {
+                    map_put(&de.hashes, bytes_hash(bytes(name_p, nlen)), 1)
+                }
+                off += reclen
+            }
+        }
+        map_put(&p.dir_cache, dir_sym, handle_addr(de))
+        _ u8 = map_get(&de.hashes, bytes_hash(comp)) catch { return false }
+        return true
+    }
+    de handle[DirEntries] = handle_from_addr(de_addr)
+    if de.missing { return false }
+    _ u8 = map_get(&de.hashes, bytes_hash(comp)) catch { return false }
+    return true
+}
+
 fn pp_read(p handle[Pp], path Bytes) handle[SourceFile] fails {
     cache handle[Map[Bytes, addr, bytes_hash, bytes_eq]] = &p.aliases
     cached addr = map_get(cache, path) catch {
-        name Buf = {}
-        defer { buf_free(&name) }
-        buf_append(&name, path)
-        physical Buf = {}
-        defer { buf_free(&physical) }
-        path_realpath(buf_cstr(&name), &physical) catch {
-            canonical Bytes = bytes_dup(&p.ctx.syms.arena, path)
-            map_put(cache, canonical, null)
+        stack_p arr[512, u8]
+        cstr addr
+        dyn_p Buf = {}
+        defer { buf_free(&dyn_p) }
+        if path.n < 512 {
+            mem_copy(&stack_p[0], path.p, path.n)
+            stack_p[path.n] = 0
+            cstr = &stack_p[0]
+        } else {
+            buf_append(&dyn_p, path)
+            cstr = buf_cstr(&dyn_p)
+        }
+        fd i32 = os_open(cstr, O_RDONLY | O_NONBLOCK, 0) catch {
+            map_put(cache, bytes_dup(&p.ctx.syms.arena, path), null)
             fail MissingInput
         }
-        b Bytes = buf_bytes(&physical)
-        files handle[Map[Bytes, addr, bytes_hash, bytes_eq]] = &p.inputs
-        v addr = map_get(files, b) catch {
-            content Buf = {}
-            file_read(buf_cstr(&physical), 1073741824, &content) catch {
+        defer { os_close(fd) }
+        st Stat = {}
+        os_fstat(fd, &st) catch {
+            map_put(cache, bytes_dup(&p.ctx.syms.arena, path), null)
+            fail MissingInput
+        }
+        if (st.mode & S_IFMT) != S_IFREG {
+            map_put(cache, bytes_dup(&p.ctx.syms.arena, path), null)
+            fail MissingInput
+        }
+        key DevIno = {st.dev, st.ino}
+        files handle[Map[DevIno, addr, devino_hash, devino_eq]] = &p.inputs
+        v addr = map_get(files, key) catch {
+            size usize = bitcast[usize](st.size)
+            if size > 1073741824 {
                 map_put(cache, bytes_dup(&p.ctx.syms.arena, path), null)
                 fail MissingInput
             }
-            n usize = content.n
-            buf_zeros(&content, 64)
+            raw addr = heap_alloc(size + 64)
+            got usize = os_read_full(fd, raw, size) catch {
+                map_put(cache, bytes_dup(&p.ctx.syms.arena, path), null)
+                fail MissingInput
+            }
+            if got != size {
+                map_put(cache, bytes_dup(&p.ctx.syms.arena, path), null)
+                fail MissingInput
+            }
+            mem_set(raw + size, 0, 64)
             fresh addr = heap_alloc_zeroed(sizeof[SourceFile])
             sf handle[SourceFile] = handle_from_addr(fresh)
-            sf.raw_data = content.p
-            sf.raw_len = n
-            map_put(files, bytes_dup(&p.ctx.syms.arena, b), fresh)
+            sf.raw_data = raw
+            sf.raw_len = size
+            map_put(files, key, fresh)
             map_put(cache, bytes_dup(&p.ctx.syms.arena, path), fresh)
             return sf
         }
@@ -200,14 +292,19 @@ fn pp_find(p handle[Pp], file Bytes, quote bool, next bool) Found {
         if next {
             if frame.directory >= 0 { start = zext[usize](bitcast[u32](frame.directory)) + 1 }
         } else if quote {
-            path_concat(&path, path_dirname(sym_name(&p.ctx.syms, frame.physical)), file)
-            f Found = pp_lookup(p, buf_bytes(&path), -1, frame.system)
-            if f.file != null { return f }
+            dir_b Bytes = path_dirname(sym_name(&p.ctx.syms, frame.physical))
+            dir_sym u32 = sym_intern_b(&p.ctx.syms, dir_b)
+            if pp_dir_might_have(p, dir_sym, file) {
+                path_concat(&path, dir_b, file)
+                f Found = pp_lookup(p, buf_bytes(&path), -1, frame.system)
+                if f.file != null { return f }
+            }
         }
     }
     for i usize in start..p.dirs.n {
         d SearchDir = vec_get[SearchDir](&p.dirs, i)
         if !quote && d.rank == 0 { continue }
+        if !pp_dir_might_have(p, d.path, file) { continue }
         buf_clear(&path)
         path_concat(&path, sym_name(&p.ctx.syms, d.path), file)
         f Found = pp_lookup(p, buf_bytes(&path), bitcast[i16](trunc[u16](i)), d.rank >= 2)
@@ -328,10 +425,34 @@ fn pp_raw(p handle[Pp]) Token fails {
         l handle[Lexer] = &frame.lexer
         active bool = pp_active(p)
         l.skipping = !active
-        // Fast AVX2 line skip inside inactive #if 0 blocks!
-        if !active && !l.in_comment && (l.flags & F_BOL) == 0 && l.at < l.n {
-            pp_skip_inactive_rest_of_line(l)
-            continue
+        // Fast AVX2 block skip inside inactive #if 0 / #ifdef UNDEF regions!
+        if !active && !l.in_comment && l.at < l.n {
+            if (l.flags & F_BOL) == 0 {
+                pp_skip_inactive_rest_of_line(l)
+            }
+            // Skip entire inactive lines until a '#' (or '%:' digraph) at BOL or EOF
+            while !l.in_comment && l.at < l.n {
+                src addr = l.p
+                at usize = l.at
+                while src[u8, at] == 32 || src[u8, at] == 9 || src[u8, at] == 11 || src[u8, at] == 12 {
+                    at += 1
+                }
+                c u8 = src[u8, at]
+                if c == 10 {
+                    l.at = at + 1
+                    l.line += 1
+                    l.flags = F_BOL
+                    continue
+                }
+                if c == 35 || (c == 37 && src[u8, at + 1] == 58) || c == 0 {
+                    l.at = at
+                    l.flags = F_BOL
+                    break
+                }
+                l.at = at
+                pp_skip_inactive_rest_of_line(l)
+            }
+            if l.in_comment { continue }
         }
         t Token = try lex_next(&p.ctx, l, false)
         if t.kind == TK_EOF {
