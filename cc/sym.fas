@@ -206,7 +206,19 @@ fn sym_intern(st handle[SymTable], p addr, n usize) u32 {
         } else {
             w0 = p[u64]
             w1 = (p + 8)[u64]
-            h = sym_hash_bytes(p, n) & ~1
+            h64 u64 = (((0xcbf29ce484222325 ^ n) ^ w0) * 0x100000001b3 ^ w1) * 0x100000001b3
+            ii usize = 16
+            while ii + 8 <= n {
+                h64 = (h64 ^ (p + ii)[u64]) * 0x100000001b3
+                ii += 8
+            }
+            if ii < n {
+                rem usize = n - ii
+                rmask u64 = (~zext[u64](0)) >> ((8 - rem) * 8)
+                h64 = (h64 ^ ((p + ii)[u64] & rmask)) * 0x100000001b3
+            }
+            h64 ^= h64 >> 33
+            h = trunc[u32](h64) & ~1
             if h == 0 { h = 2 }
         }
     }
@@ -235,7 +247,15 @@ fn sym_intern(st handle[SymTable], p addr, n usize) u32 {
                 if n != 0 || slot.id == 0 { return slot.id }
             } else {
                 s Bytes = st.spellings.p[Bytes, zext[usize](slot.id)]
-                if s.n == n && sym_eq_fast(s.p + 16, p + 16, n - 16) { return slot.id }
+                if s.n == n {
+                    rem usize = n - 16
+                    if rem <= 8 {
+                        rmask u64 = (~zext[u64](0)) >> ((8 - rem) * 8)
+                        if ((((s.p + 16)[u64] ^ (p + 16)[u64]) & rmask) == 0) { return slot.id }
+                    } else if sym_eq_fast(s.p + 16, p + 16, rem) {
+                        return slot.id
+                    }
+                }
             }
         }
         pos = (pos + 1) & mask

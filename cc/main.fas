@@ -766,6 +766,7 @@ fn cli_compile_one_c(command handle[Options], dir_strs handle[Vec[addr]], dir_ra
         arena_free(&p.ctx.syms.arena)
         arena_free(&p.ctx.sm.synth_arena)
         arena_free(&p.macro_arena)
+        arena_free(&p.file_arena)
     }
     cc_ctx_init(&p.ctx)
     p.ctx.syms.track_active = false

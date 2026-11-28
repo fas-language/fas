@@ -86,6 +86,7 @@ struct Pp {
     cache_toks Vec[Token]
     // Lock-free bump arena for transient macro expansion buffers; reset at depth 0
     macro_arena Arena
+    file_arena Arena
 }
 
 fn pp_macro_arena_reset(p handle[Pp]) void {
@@ -200,7 +201,7 @@ fn pp_read(p handle[Pp], path Bytes) handle[SourceFile] fails {
                 map_put(cache, bytes_dup(&p.ctx.syms.arena, path), null)
                 fail MissingInput
             }
-            raw addr = heap_alloc(size + 64)
+            raw addr = arena_alloc(&p.file_arena, size + 64, 16)
             got usize = os_read_full(fd, raw, size) catch {
                 map_put(cache, bytes_dup(&p.ctx.syms.arena, path), null)
                 fail MissingInput
@@ -209,8 +210,7 @@ fn pp_read(p handle[Pp], path Bytes) handle[SourceFile] fails {
                 map_put(cache, bytes_dup(&p.ctx.syms.arena, path), null)
                 fail MissingInput
             }
-            mem_set(raw + size, 0, 64)
-            fresh addr = heap_alloc_zeroed(sizeof[SourceFile])
+            fresh addr = arena_alloc(&p.file_arena, sizeof[SourceFile], 8)
             sf handle[SourceFile] = handle_from_addr(fresh)
             sf.raw_data = raw
             sf.raw_len = size

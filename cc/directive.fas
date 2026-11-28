@@ -133,6 +133,15 @@ fn pp_lex_line(ctx handle[CcCtx], l handle[Lexer], tokens handle[Vec[Token]], he
                 }
                 l.at = at; l.flags = flags; break
             }
+            if ch == 34 {
+                tp addr = src + at
+                sw usize = lex_scan_string(tp, 1, 34)
+                if tp[u8, sw] == 34 && sw + 1 < 0xFFFF {
+                    vec_push[Token](tokens, tok_make(TK_STR, flags, trunc[u16](sw + 1), base + trunc[u32](at), 0))
+                    at += sw + 1; flags = 0; continue
+                }
+                l.at = at; l.flags = flags; break
+            }
             if (cls & B_PUNCT) != 0 && !(ch == 46 && (B_CLASS[zext[usize](src[u8, at + 1])] & B_DIGIT) != 0) {
                 pw usize = 1
                 pk u8 = lex_punct(src + at, &pw)
@@ -230,13 +239,15 @@ fn pp_define(p handle[Pp], args handle[Vec[Token]], loc u32, system bool) void f
         if i == args.n || args.p[Token, i].kind != TK_RPAREN { try cc_error(ctx, loc, c"expected ')' in macro parameters") }
         i += 1
     }
-    try pp_check_replacement(ctx, m, args.p, i, args.n, false)
+    body_n usize = args.n - i
+    if body_n != 0 && (m.function || body_n > 1 || tok_is_paste(args.p[Token, i].kind)) {
+        try pp_check_replacement(ctx, m, args.p, i, args.n, false)
+    }
     has_paste bool = false
     has_ident bool = false
     has_param bool = false
     has_hash bool = false
     has_va_opt bool = false
-    body_n usize = args.n - i
     if body_n != 0 {
         m.body.p = arena_alloc(&ctx.syms.arena, body_n * sizeof[Token], 8)
         m.body.n = body_n
